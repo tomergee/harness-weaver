@@ -50,15 +50,41 @@ surface and the bundled example trajectories don't require one.
 git clone https://github.com/tomergee/harness-weaver
 cd harness-weaver
 pip install -e ".[dev]"
-make check                                 # 111 tests, ~96% coverage
+make check                                 # 149 tests, ~94% coverage
 
 harness-weaver list-configs                # see the three built-in configurations
 ```
 
-The three CLI subcommands (`run`, `compare`, `eval`) wire the production
-stack and currently fail with a clear `NotImplementedError` because the
-`RealAgentRunner` (Claude Agent SDK + MCP) isn't wired up yet — that's the
-next deliverable. To exercise the harness end-to-end *today*, drive
+### Running against the live model
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+# Single-agent run with Haiku, the cheapest credible model:
+harness-weaver run examples/tasks/discovery-mood-tense.json \
+    --config single-agent-basic \
+    --model claude-haiku-4-5-20251001
+
+# Multi-agent: orchestrator delegates to Discovery and Explainer workers.
+harness-weaver run examples/tasks/discovery-mood-tense.json \
+    --config multi-agent-discovery-explainer \
+    --model claude-haiku-4-5-20251001
+
+# Sandbox: agent has run_python in addition to catalog tools.
+harness-weaver run examples/tasks/analytical-runtime-rating.json \
+    --config single-agent-with-sandbox \
+    --model claude-haiku-4-5-20251001
+```
+
+`run`, `compare`, and `eval` use `RealAgentRunner`, which drives
+`claude-agent-sdk`'s `query()` against an in-process MCP server that
+wraps our tool registry — see [ADR-0004](docs/adr/0004-mcp-transport-in-process.md)
+for the transport choice. The committed trajectories in
+[`examples/output/`](examples/output/) are real Haiku runs from the
+three configurations above.
+
+### Running without an API key
+
+To exercise the harness end-to-end without a model in the loop, drive
 `Harness` directly with a `FakeAgentRunner`:
 
 ```python
@@ -92,6 +118,10 @@ Two committed sample trajectories live in
 * `analytical-runtime-rating.single-agent-with-sandbox.json` — sandbox
   in action; `run_python` actually executes against the catalog data the
   search tool returned.
+
+For a guided tour of how to use the harness — task format,
+configurations, CLI reference, extending the tool surface, common
+gotchas — see the **[user manual in `docs/manual/`](docs/manual/README.md)**.
 
 ---
 

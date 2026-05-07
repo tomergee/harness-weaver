@@ -9,18 +9,17 @@ Three subcommands:
               trajectories. (Judge integration lands separately.)
 
 The CLI wires the production stack: the bundled catalog, a fresh
-:class:`LocalSubprocessBackend`, and :class:`RealAgentRunner`.
-``RealAgentRunner`` is not implemented yet (see ``agent_runner.py``), so
-the commands intentionally raise a clear ``NotImplementedError`` that
-points at the next deliverable.
+:class:`LocalSubprocessBackend`, and :class:`RealAgentRunner`. Live runs
+require ``ANTHROPIC_API_KEY`` (or whatever credential the
+``claude-agent-sdk`` picks up from its environment).
 
-For programmatic use without the SDK wired up, instantiate
+For programmatic use without the SDK in the loop, instantiate
 :class:`Harness` directly with a :class:`FakeAgentRunner`; this is the
 path the e2e tests exercise.
 """
 
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 from rich.console import Console
@@ -31,6 +30,9 @@ from harness_weaver.catalog import Catalog
 from harness_weaver.configurations import builtin_configurations, configuration_by_name
 from harness_weaver.harness import Harness
 from harness_weaver.task import Task, TaskPack
+
+if TYPE_CHECKING:
+    from harness_weaver.configurations import Configuration
 
 app = typer.Typer(
     name="harness-weaver",
@@ -82,18 +84,41 @@ def _write_trajectory(trajectory_json: str, path: Path) -> None:
     console.print(f"trajectory written to [bold]{path}[/bold]")
 
 
+def _resolve_config(name: str, model_override: str | None) -> "Configuration":
+    """Look up a built-in configuration and apply an optional model override.
+
+    The override is applied via pydantic's ``model_copy`` so the returned
+    Configuration is a fresh frozen instance — built-ins stay immutable.
+    """
+    cfg = configuration_by_name(name)
+    if model_override is None:
+        return cfg
+    return cfg.model_copy(update={"model": model_override})
+
+
 @app.command()
 def run(
     task: Annotated[Path, typer.Argument(help="Path to a task JSON file.", exists=True)],
     config: Annotated[
         str, typer.Option("--config", "-c", help="Configuration name to run.")
     ] = "single-agent-basic",
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--model",
+            help=(
+                "Override the configuration's pinned model "
+                "(e.g. 'claude-haiku-4-5-20251001'). Falls back to the "
+                "Configuration's `model` field, then the SDK default."
+            ),
+        ),
+    ] = None,
     output_dir: Annotated[
         Path, typer.Option("--output-dir", help="Directory for trajectory output.")
     ] = Path("runs"),
 ) -> None:
     """Run a single task with one configuration; emit a trajectory."""
-    cfg = configuration_by_name(config)
+    cfg = _resolve_config(config, model)
     task_obj = Task.from_path(task)
     harness = _build_harness()
     trajectory = harness.run(task_obj, cfg)
@@ -106,6 +131,10 @@ def compare(
     task: Annotated[Path, typer.Argument(help="Path to a task JSON file.", exists=True)],
     config_a: Annotated[str, typer.Option("--config-a", help="Configuration A.")],
     config_b: Annotated[str, typer.Option("--config-b", help="Configuration B.")],
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="Override the model for both configurations."),
+    ] = None,
     output_dir: Annotated[
         Path, typer.Option("--output-dir", help="Directory for comparison output.")
     ] = Path("runs"),
@@ -116,8 +145,8 @@ def compare(
     For now this command writes both trajectories to disk so the judge can
     consume them later without re-running the agent.
     """
-    cfg_a = configuration_by_name(config_a)
-    cfg_b = configuration_by_name(config_b)
+    cfg_a = _resolve_config(config_a, model)
+    cfg_b = _resolve_config(config_b, model)
     task_obj = Task.from_path(task)
     harness = _build_harness()
     for cfg in (cfg_a, cfg_b):
@@ -132,6 +161,10 @@ def eval_(
     config: Annotated[
         str, typer.Option("--config", "-c", help="Configuration name to evaluate.")
     ] = "single-agent-basic",
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="Override the configuration's pinned model."),
+    ] = None,
     output_dir: Annotated[
         Path, typer.Option("--output-dir", help="Directory for evaluation output.")
     ] = Path("runs"),
@@ -141,7 +174,7 @@ def eval_(
     Per-task trajectories are written to ``output_dir``. The aggregate
     judge report lands with the judge integration.
     """
-    cfg = configuration_by_name(config)
+    cfg = _resolve_config(config, model)
     pack_obj = TaskPack.from_path(pack)
     harness = _build_harness()
     for task_obj in pack_obj.tasks:

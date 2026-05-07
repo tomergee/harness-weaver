@@ -16,7 +16,7 @@ real runner). The Harness signature does not change.
 
 import pytest
 
-from harness_weaver.agent_runner import FakeAgentRunner, RealAgentRunner, answer, call, say
+from harness_weaver.agent_runner import FakeAgentRunner, answer, call, say
 from harness_weaver.catalog import Catalog
 from harness_weaver.configurations import (
     MULTI_AGENT_DISCOVERY_EXPLAINER,
@@ -225,13 +225,5 @@ class TestMultiAgentDiscoveryExplainer:
         assert "explainer" in results[2].error
 
 
-# --- RealAgentRunner --------------------------------------------------
-
-
-class TestRealAgentRunnerStub:
-    def test_raises_with_actionable_message(self, catalog: Catalog, discovery_task: Task) -> None:
-        # The stub exists so the architecture is in place; calling it should
-        # tell you exactly what's missing rather than fail mysteriously.
-        harness = Harness(catalog=catalog, runner=RealAgentRunner())
-        with pytest.raises(NotImplementedError, match="SDK-wiring PR"):
-            harness.run(discovery_task, SINGLE_AGENT_BASIC)
+# RealAgentRunner has its own dedicated tests in test_real_agent_runner.py
+# that drive it through an injected fake query_fn — no live SDK needed.

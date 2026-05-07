@@ -3,8 +3,9 @@
 A runner takes a prompt, a configuration, and a tool registry, and produces
 a :class:`Trajectory`. Two implementations:
 
-* :class:`RealAgentRunner` — wraps ``claude-agent-sdk`` and an MCP server
-  exposing the registry. Not yet implemented (lands with the SDK-wiring PR).
+* :class:`RealAgentRunner` — wraps ``claude-agent-sdk.query`` and an
+  in-process MCP server exposing the registry. Live model in the loop;
+  needs ``ANTHROPIC_API_KEY``.
 * :class:`FakeAgentRunner` — replays a scripted sequence of decisions but
   invokes the *real* tool registry, so tests exercise the registry/tool
   integration without an API key.
@@ -15,14 +16,38 @@ for a tool it isn't allowed to call gets a structured error rather than
 silent execution.
 """
 
+import asyncio
 import time
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import claude_agent_sdk as sdk
+
 from harness_weaver.configurations import ORCHESTRATOR_AGENT_ID, Configuration
+from harness_weaver.mcp_server import DEFAULT_SERVER_NAME, build_sdk_server
+from harness_weaver.sdk_compile import compile_options
+from harness_weaver.sdk_translate import SdkMessageTranslator
 from harness_weaver.tools import ToolError, ToolRegistry
 from harness_weaver.trajectory import Trajectory, TrajectoryRecorder
+
+QueryFn = Callable[..., AsyncIterator[Any]]
+"""Signature of ``claude_agent_sdk.query`` — kept open so tests can inject a fake."""
+
+
+class HarnessRunError(RuntimeError):
+    """Raised when a live SDK run fails after recording started.
+
+    Carries the partial :class:`Trajectory` recorded up to the failure so
+    callers can debug what the agent did before things went wrong (the
+    last few tool calls usually point at the cause). The original
+    exception is preserved as ``__cause__``.
+    """
+
+    def __init__(self, message: str, *, partial_trajectory: Trajectory) -> None:
+        super().__init__(message)
+        self.partial_trajectory = partial_trajectory
 
 
 class AgentRunner(ABC):
@@ -44,13 +69,40 @@ class AgentRunner(ABC):
 
 
 class RealAgentRunner(AgentRunner):
-    """Production runner. Not implemented yet.
+    """Production runner: drives ``claude_agent_sdk.query`` against an
+    in-process MCP server wrapping our tool registry.
 
-    The architecture is in place for this to wrap ``claude-agent-sdk.query``
-    and a stdio MCP server that exposes the tool registry. Wiring is
-    intentionally deferred to a follow-up PR so the design choices made
-    here can be reviewed independently of the SDK integration details.
+    Args:
+        query_fn: Override the SDK's ``query`` function — used by tests
+            to inject a scripted async iterator of SDK messages without
+            hitting the API. Defaults to ``claude_agent_sdk.query``.
+        server_name: MCP server name. Threaded through to the compiler
+            (so qualified tool names match) and the translator (so the
+            prefix-strip in the trajectory matches). Override only if
+            you have a reason to use a non-default server name; the
+            default is fine for the bundled configurations.
+
+    Two entry points:
+        * :meth:`run` — sync. Wraps :meth:`arun` with ``asyncio.run``.
+          Raises ``RuntimeError`` if called from inside a running event
+          loop (use :meth:`arun` from async callers).
+        * :meth:`arun` — async. Awaitable from any coroutine; the
+          fundamental version. CLI uses :meth:`run`; library callers in
+          async contexts (Jupyter, FastAPI, etc.) should use this.
+
+    Recording a vcrpy cassette of one live run lets CI replay the same
+    trajectory deterministically; see ``tests/test_real_agent_runner.py``
+    for the cassette hook.
     """
+
+    def __init__(
+        self,
+        *,
+        query_fn: QueryFn | None = None,
+        server_name: str = DEFAULT_SERVER_NAME,
+    ) -> None:
+        self._query_fn: QueryFn = query_fn or sdk.query
+        self._server_name = server_name
 
     def run(
         self,
@@ -60,12 +112,63 @@ class RealAgentRunner(AgentRunner):
         registry: ToolRegistry,
         task_id: str,
     ) -> Trajectory:
-        del prompt, configuration, registry, task_id  # consumed by the future implementation
-        raise NotImplementedError(
-            "RealAgentRunner is not implemented yet. Use FakeAgentRunner with a script "
-            "for tests, or wait for the SDK-wiring PR. Tracked as the next deliverable "
-            "after the Tier 1 architecture lands."
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop — safe to drive our own.
+            return asyncio.run(
+                self.arun(
+                    prompt=prompt,
+                    configuration=configuration,
+                    registry=registry,
+                    task_id=task_id,
+                )
+            )
+        raise RuntimeError(
+            "RealAgentRunner.run() was called from inside a running event loop "
+            "(e.g. Jupyter, FastAPI, pytest-asyncio). Use `await runner.arun(...)` "
+            "instead — `run()` is sync-only."
         )
+
+    async def arun(
+        self,
+        *,
+        prompt: str,
+        configuration: Configuration,
+        registry: ToolRegistry,
+        task_id: str,
+    ) -> Trajectory:
+        recorder = TrajectoryRecorder(
+            task_id=task_id,
+            configuration_name=configuration.name,
+        )
+        recorder.user_message(prompt)
+
+        mcp_server = build_sdk_server(registry, name=self._server_name)
+        options = compile_options(
+            configuration, mcp_server=mcp_server, server_name=self._server_name
+        )
+        translator = SdkMessageTranslator(server_name=self._server_name)
+
+        try:
+            async for message in self._query_fn(prompt=prompt, options=options):
+                translator.translate(message, recorder)
+        except Exception as exc:
+            # Preserve every event recorded before the failure so callers can
+            # debug. The synthetic assistant_turn marks where the failure was;
+            # __cause__ on the raised exception still chains back to the
+            # original error for traceback inspection.
+            recorder.assistant_turn(
+                f"<run aborted: {type(exc).__name__}: {exc}>",
+                agent_id=ORCHESTRATOR_AGENT_ID,
+            )
+            partial = recorder.finish()
+            raise HarnessRunError(
+                f"live SDK run failed mid-flight: {exc}",
+                partial_trajectory=partial,
+            ) from exc
+
+        return recorder.finish()
 
 
 # --- Fake runner for tests -----------------------------------------------
@@ -215,6 +318,7 @@ class FakeAgentRunner(AgentRunner):
 __all__ = [
     "AgentRunner",
     "FakeAgentRunner",
+    "HarnessRunError",
     "RealAgentRunner",
     "ScriptStep",
     "answer",

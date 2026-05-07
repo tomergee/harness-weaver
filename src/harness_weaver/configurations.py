@@ -64,6 +64,14 @@ class Configuration(BaseModel):
         default=(),
         description="Worker definitions. Empty for single-agent configurations.",
     )
+    model: str | None = Field(
+        default=None,
+        description=(
+            "Anthropic model id to pin (e.g. 'claude-haiku-4-5-20251001'). None means "
+            "let the SDK choose its default. The CLI's --model flag overrides this "
+            "via Configuration.model_copy."
+        ),
+    )
 
     @property
     def is_multi_agent(self) -> bool:
