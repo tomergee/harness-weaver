@@ -53,3 +53,22 @@ def test_run_unknown_config_fails_cleanly(tmp_path: Path, sample_task: dict[str,
     result = runner.invoke(app, ["run", str(task_path), "--config", "not-a-real-config"])
     assert result.exit_code != 0
     assert isinstance(result.exception, KeyError)
+
+
+def test_model_override_propagates_via_resolve_config() -> None:
+    """The CLI's --model flag should produce a Configuration with model set,
+    leaving the original built-in untouched."""
+    from harness_weaver.cli import _resolve_config
+    from harness_weaver.configurations import SINGLE_AGENT_BASIC
+
+    overridden = _resolve_config("single-agent-basic", "claude-haiku-4-5-20251001")
+    assert overridden.model == "claude-haiku-4-5-20251001"
+    # Built-in stays unmodified (frozen pydantic model).
+    assert SINGLE_AGENT_BASIC.model is None
+
+
+def test_model_none_keeps_configuration_default() -> None:
+    from harness_weaver.cli import _resolve_config
+
+    cfg = _resolve_config("single-agent-basic", None)
+    assert cfg.model is None

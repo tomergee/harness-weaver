@@ -59,15 +59,28 @@ harness-weaver list-configs                # see the three built-in configuratio
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
+# Single-agent run with Haiku, the cheapest credible model:
 harness-weaver run examples/tasks/discovery-mood-tense.json \
-    --config single-agent-basic
-# trajectory written to runs/discovery-mood-tense.single-agent-basic.json
+    --config single-agent-basic \
+    --model claude-haiku-4-5-20251001
+
+# Multi-agent: orchestrator delegates to Discovery and Explainer workers.
+harness-weaver run examples/tasks/discovery-mood-tense.json \
+    --config multi-agent-discovery-explainer \
+    --model claude-haiku-4-5-20251001
+
+# Sandbox: agent has run_python in addition to catalog tools.
+harness-weaver run examples/tasks/analytical-runtime-rating.json \
+    --config single-agent-with-sandbox \
+    --model claude-haiku-4-5-20251001
 ```
 
 `run`, `compare`, and `eval` use `RealAgentRunner`, which drives
 `claude-agent-sdk`'s `query()` against an in-process MCP server that
 wraps our tool registry — see [ADR-0004](docs/adr/0004-mcp-transport-in-process.md)
-for the transport choice.
+for the transport choice. The committed trajectories in
+[`examples/output/`](examples/output/) are real Haiku runs from the
+three configurations above.
 
 ### Running without an API key
 

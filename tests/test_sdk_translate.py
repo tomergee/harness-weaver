@@ -174,15 +174,16 @@ class TestToolUseAndResult:
 
 
 class TestSubAgentAttribution:
-    def test_task_tool_attributes_subsequent_messages_to_worker(self) -> None:
+    def test_delegation_tool_attributes_subsequent_messages_to_worker(self) -> None:
         rec = _record()
         translator = SdkMessageTranslator()
-        # Orchestrator delegates to Discovery via the Task tool.
+        # Orchestrator delegates to Discovery via the Agent tool (the SDK's
+        # delegation primitive in claude-agent-sdk 0.1.76).
         translator.translate(
             _assistant(
                 sdk.ToolUseBlock(
                     id="task1",
-                    name="Task",
+                    name="Agent",
                     input={"subagent_type": "discovery", "prompt": "find candidates"},
                 )
             ),
@@ -237,10 +238,58 @@ class TestResultMessage:
         assert len(traj.events) == 0
 
 
+class TestUserMessageToolResults:
+    """UserMessage carries tool results back from the SDK — translator
+    must extract them so the trajectory has tool_result events to pair
+    with the tool_use events the AssistantMessage emitted."""
+
+    def test_user_message_with_tool_result_block_recorded(self) -> None:
+        rec = _record()
+        translator = SdkMessageTranslator()
+        # First, the assistant calls a tool.
+        translator.translate(
+            _assistant(sdk.ToolUseBlock(id="t1", name="search_titles", input={})),
+            rec,
+        )
+        # The SDK echoes the result back as a UserMessage with list content.
+        user_msg = sdk.UserMessage(
+            content=[
+                sdk.ToolResultBlock(
+                    tool_use_id="t1",
+                    content=[{"type": "text", "text": '{"hits": [], "total_matched": 0}'}],
+                    is_error=False,
+                )
+            ],
+            uuid=None,
+            parent_tool_use_id=None,
+            tool_use_result=None,
+        )
+        translator.translate(user_msg, rec)
+        traj = rec.finish()
+        results = [e for e in traj.events if isinstance(e, ToolResult)]
+        assert len(results) == 1
+        assert results[0].tool_name == "search_titles"
+        assert results[0].result == {"hits": [], "total_matched": 0}
+
+    def test_user_message_with_string_content_skipped(self) -> None:
+        # The SDK echoes the original prompt as a UserMessage with string
+        # content; the recorder already wrote a UserMessage event upfront,
+        # so the translator must not double-record.
+        rec = _record()
+        msg = sdk.UserMessage(
+            content="ping",
+            uuid=None,
+            parent_tool_use_id=None,
+            tool_use_result=None,
+        )
+        SdkMessageTranslator().translate(msg, rec)
+        assert len(rec.finish().events) == 0
+
+
 class TestUnknownMessages:
     def test_silently_dropped(self) -> None:
         rec = _record()
-        # Pass something that isn't an AssistantMessage or ResultMessage —
+        # Pass something that isn't an AssistantMessage / UserMessage / ResultMessage —
         # forward-compatibility: future SDK message types are dropped silently.
         SdkMessageTranslator().translate("not a message", rec)  # type: ignore[arg-type]
         assert len(rec.finish().events) == 0

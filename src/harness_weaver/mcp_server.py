@@ -36,6 +36,18 @@ if TYPE_CHECKING:
 DEFAULT_SERVER_NAME = "harness_weaver"
 
 
+def qualified_tool_name(tool_name: str, server_name: str = DEFAULT_SERVER_NAME) -> str:
+    """The SDK exposes MCP tools to the model under ``mcp__<server>__<tool>``.
+
+    ``ClaudeAgentOptions.allowed_tools`` and ``AgentDefinition.tools`` must
+    use the qualified form, otherwise the SDK treats every tool call as
+    unpermitted and the agent gives up. Verified empirically against
+    claude-agent-sdk 0.1.76 — see the smoke run that surfaced this in
+    PR-3 review.
+    """
+    return f"mcp__{server_name}__{tool_name}"
+
+
 def wrap_tools(registry: ToolRegistry) -> list[sdk.SdkMcpTool[Any]]:
     """Return the SDK-tool wrappers for every tool in the registry.
 
@@ -92,4 +104,4 @@ def _wrap_tool(tool: Tool[Any, Any]) -> sdk.SdkMcpTool[Any]:
     return wrapper
 
 
-__all__ = ["DEFAULT_SERVER_NAME", "build_sdk_server", "wrap_tools"]
+__all__ = ["DEFAULT_SERVER_NAME", "build_sdk_server", "qualified_tool_name", "wrap_tools"]

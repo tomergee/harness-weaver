@@ -173,7 +173,11 @@ class TestRealAgentRunnerEndToEnd:
 
         opts: sdk.ClaudeAgentOptions = captured["options"]
         assert opts.system_prompt == SINGLE_AGENT_BASIC.system_prompt
-        assert opts.allowed_tools == list(SINGLE_AGENT_BASIC.allowed_tools)
+        # allowed_tools carries the MCP-qualified names so the SDK auto-permits.
+        # Compared as sets because the compiler sorts/dedupes for determinism.
+        assert set(opts.allowed_tools) == {
+            f"mcp__harness_weaver__{t}" for t in SINGLE_AGENT_BASIC.allowed_tools
+        }
         # MCP server registered under the default name.
         assert isinstance(opts.mcp_servers, dict)
         assert "harness_weaver" in opts.mcp_servers

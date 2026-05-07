@@ -43,9 +43,26 @@ from typing import TYPE_CHECKING, Any
 import claude_agent_sdk as sdk
 
 from harness_weaver.configurations import ORCHESTRATOR_AGENT_ID
+from harness_weaver.mcp_server import DEFAULT_SERVER_NAME
+from harness_weaver.sdk_compile import DELEGATION_TOOL_NAME
 
 if TYPE_CHECKING:
     from harness_weaver.trajectory import TrajectoryRecorder
+
+_MCP_PREFIX = f"mcp__{DEFAULT_SERVER_NAME}__"
+
+
+def _unqualify(tool_name: str) -> str:
+    """Strip the ``mcp__<server>__`` prefix the SDK adds to MCP tool names.
+
+    The trajectory should expose the names callers wrote in
+    ``Configuration.allowed_tools`` (``search_titles``, etc.), not the
+    SDK-internal namespaced form. Names that don't match the prefix
+    (built-in tools, server-side tools) pass through unchanged.
+    """
+    if tool_name.startswith(_MCP_PREFIX):
+        return tool_name[len(_MCP_PREFIX) :]
+    return tool_name
 
 
 class SdkMessageTranslator:
@@ -73,10 +90,11 @@ class SdkMessageTranslator:
         """Append events to ``recorder`` based on ``message``."""
         if isinstance(message, sdk.AssistantMessage):
             self._translate_assistant(message, recorder)
+        elif isinstance(message, sdk.UserMessage):
+            self._translate_user(message, recorder)
         elif isinstance(message, sdk.ResultMessage):
             self._translate_result(message, recorder)
-        # SystemMessage, StreamEvent, RateLimitEvent, UserMessage echoes
-        # carry no information we want to record. Drop silently — the SDK
+        # SystemMessage, StreamEvent, RateLimitEvent: drop silently. The SDK
         # may add new message types in future versions and we want to be
         # forward-compatible.
 
@@ -111,14 +129,15 @@ class SdkMessageTranslator:
         recorder: TrajectoryRecorder,
         agent_id: str,
     ) -> None:
-        # If this is a Task delegation, remember which worker the
-        # subsequent messages should be attributed to.
-        if block.name == "Task":
+        # If this is a delegation call (Agent / Task), remember which
+        # worker the subsequent messages should be attributed to.
+        if block.name == DELEGATION_TOOL_NAME:
             subagent_type = block.input.get("subagent_type")
             if isinstance(subagent_type, str):
                 self._role_by_tool_use_id[block.id] = subagent_type
-        self._name_by_tool_use_id[block.id] = block.name
-        recorder.tool_use(block.name, dict(block.input), agent_id=agent_id)
+        clean_name = _unqualify(block.name)
+        self._name_by_tool_use_id[block.id] = clean_name
+        recorder.tool_use(clean_name, dict(block.input), agent_id=agent_id)
 
     def _record_tool_result(
         self,
@@ -140,6 +159,28 @@ class SdkMessageTranslator:
             duration_seconds=0.0,
             agent_id=agent_id,
         )
+
+    def _translate_user(
+        self,
+        message: sdk.UserMessage,
+        recorder: TrajectoryRecorder,
+    ) -> None:
+        """UserMessage carries tool results back to the assistant.
+
+        The SDK echoes our user prompt (with ``content: str``) and also
+        emits UserMessages whose ``content`` is a list including
+        ``ToolResultBlock`` — that's how tool execution results re-enter
+        the conversation. We only record the result blocks; the prompt
+        echo was already recorded by the harness itself.
+        """
+        if isinstance(message.content, str):
+            return  # the user prompt echo; nothing to record
+        agent_id = self._agent_id_for(message.parent_tool_use_id)
+        for block in message.content:
+            if isinstance(block, sdk.ToolResultBlock):
+                self._record_tool_result(block, recorder, agent_id)
+            # Other block types in UserMessage.content are echoed assistant
+            # output, ignored to avoid double-recording.
 
     def _translate_result(
         self,
