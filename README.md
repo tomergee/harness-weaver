@@ -42,32 +42,56 @@ The answers turn out to be more interesting in code than in slides.
 
 ## Quickstart
 
-Requires Python 3.11+ and an `ANTHROPIC_API_KEY`. No Kubernetes needed for
-the default path.
+Requires Python 3.11+. No Kubernetes needed for the default path. An
+`ANTHROPIC_API_KEY` is needed to run against a live model; the test
+surface and the bundled example trajectories don't require one.
 
 ```bash
 git clone https://github.com/tomergee/harness-weaver
 cd harness-weaver
 pip install -e ".[dev]"
-export ANTHROPIC_API_KEY=sk-ant-...
+make check                                 # 111 tests, ~96% coverage
 
-# Run a single task with one configuration
-harness-weaver run examples/tasks/discovery-mood-tense.json \
-    --config single-agent-with-sandbox
-
-# Compare two configurations side-by-side on the same task
-harness-weaver compare examples/tasks/discovery-mood-tense.json \
-    --config-a single-agent-basic \
-    --config-b multi-agent-discovery-explainer
-
-# Evaluate a config against a full task pack and emit a judge report
-harness-weaver eval examples/packs/discovery.json \
-    --config single-agent-with-sandbox
+harness-weaver list-configs                # see the three built-in configurations
 ```
 
-Example trajectories and a sample comparison report are checked in under
-`examples/output/` so you can see what the harness produces without setting
-up an API key.
+The three CLI subcommands (`run`, `compare`, `eval`) wire the production
+stack and currently fail with a clear `NotImplementedError` because the
+`RealAgentRunner` (Claude Agent SDK + MCP) isn't wired up yet — that's the
+next deliverable. To exercise the harness end-to-end *today*, drive
+`Harness` directly with a `FakeAgentRunner`:
+
+```python
+from harness_weaver.agent_runner import FakeAgentRunner, say, call, answer
+from harness_weaver.catalog import Catalog
+from harness_weaver.configurations import SINGLE_AGENT_BASIC
+from harness_weaver.harness import Harness
+from harness_weaver.task import Task
+
+task = Task.from_path("examples/tasks/discovery-mood-tense.json")
+runner = FakeAgentRunner([
+    call("user_history", {"user_id": "user-001", "limit": 10}),
+    call("search_titles", {"genres": ["Thriller"], "max_runtime": 120}),
+    answer("I'd recommend Get Out — 104 min, modern thriller, not in your history."),
+])
+trajectory = Harness(catalog=Catalog.load_default(), runner=runner).run(
+    task, SINGLE_AGENT_BASIC,
+)
+print(trajectory.model_dump_json(indent=2))
+```
+
+Tool calls in the script are dispatched to the **real** tool registry, so
+this exercises tools, the registry, the catalog, the execution backend
+(when `run_python` is in scope), trajectory recording, and configuration
+allow-list enforcement — all without an LLM in the loop.
+
+Two committed sample trajectories live in
+[`examples/output/`](examples/output/):
+
+* `discovery-mood-tense.single-agent-basic.json` — the example above.
+* `analytical-runtime-rating.single-agent-with-sandbox.json` — sandbox
+  in action; `run_python` actually executes against the catalog data the
+  search tool returned.
 
 ---
 
