@@ -33,7 +33,7 @@ def _version_callback(value: bool) -> None:
 
 @app.callback()
 def main(
-    version: Annotated[  # noqa: ARG001 — typer reads this via callback
+    version: Annotated[
         bool,
         typer.Option(
             "--version",
@@ -45,6 +45,7 @@ def main(
     ] = False,
 ) -> None:
     """harness-weaver entry point."""
+    del version  # consumed by the eager callback above
 
 
 @app.command()
@@ -73,8 +74,7 @@ def compare(
 ) -> None:
     """Run the same task under two configurations and emit a side-by-side judge report."""
     console.print(
-        f"[yellow]Not yet implemented[/yellow]: compare {task} "
-        f"with {config_a} vs {config_b}"
+        f"[yellow]Not yet implemented[/yellow]: compare {task} with {config_a} vs {config_b}"
     )
     raise typer.Exit(code=2)
 
