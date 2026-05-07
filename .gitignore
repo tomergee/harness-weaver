@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Secrets and runtime
+.env
+.env.*
+!.env.example
+*.local
+secrets/
+
+# harness-weaver runtime artifacts
+trajectories/
+runs/
+.harness-cache/
+
+# Cassettes for vcrpy — keep cassettes IN the repo; ignore only generated raw
+# request logs if any.
+*.raw.log

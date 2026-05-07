@@ -1,0 +1,150 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "harness-weaver"
+version = "0.1.0"
+description = "An experimentation harness for agentic systems on recommendation-style tasks. Compares configurations side-by-side via the Claude Agent SDK, MCP-exposed tools, and sandboxed code execution."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Tomer", email = "you@example.com" }]
+keywords = ["agents", "llm", "mcp", "evaluation", "sandbox", "anthropic"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    # Agent runtime
+    "claude-agent-sdk>=0.1.0",
+    "mcp>=1.0.0",
+    # Sandboxed execution
+    "k8s-agent-sandbox>=0.1.0",
+    # Eval pipeline
+    "inspect-ai>=0.3.0",
+    # Validation and CLI
+    "pydantic>=2.7",
+    "typer>=0.12",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-asyncio>=0.23",
+    "mypy>=1.10",
+    "ruff>=0.5",
+    "pre-commit>=3.7",
+    "vcrpy>=6.0",
+    "pytest-vcr>=1.0.2",
+]
+
+[project.scripts]
+harness-weaver = "harness_weaver.cli:app"
+
+[project.urls]
+Repository = "https://github.com/tomergee/harness-weaver"
+Issues = "https://github.com/tomergee/harness-weaver/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/harness_weaver"]
+
+# ---------------------------------------------------------------------------
+# Ruff — lint and format. Keep rules conservative; loosen as the codebase grows.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+    "TCH",  # flake8-type-checking
+    "PTH",  # flake8-use-pathlib
+    "PIE",  # flake8-pie
+    "RET",  # flake8-return
+    "N",    # pep8-naming
+]
+ignore = [
+    "E501",  # line length handled by formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "N802", "N803"]  # asserts, snake_case test names
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ---------------------------------------------------------------------------
+# Mypy — strict from day 1. Tightens over time, never loosens.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+show_error_codes = true
+pretty = true
+
+[[tool.mypy.overrides]]
+# Third-party packages without stubs. Add specific entries here as needed
+# rather than disabling globally — keeps the strictness budget visible.
+module = [
+    "k8s_agent_sandbox.*",
+    "inspect_ai.*",
+    "vcr.*",
+]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Pytest — coverage gating from day 1.
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+    "--cov=harness_weaver",
+    "--cov-report=term-missing",
+    "--cov-fail-under=70",
+]
+markers = [
+    "e2e: end-to-end tests (may use cassettes; slower)",
+    "integration: tests that require live external services (skipped in CI by default)",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src/harness_weaver"]
+
+[tool.coverage.report]
+exclude_also = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if typing.TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@overload",
+]
