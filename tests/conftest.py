@@ -40,7 +40,7 @@ def sample_task() -> dict[str, object]:
     return {
         "task_id": "test-001",
         "user_prompt": "Find me a tense thriller under two hours.",
-        "user_context": {"user_id": "test-user", "history": []},
+        "user_id": "user-001",
         "expected_outcome": (
             "Returns one or more thriller titles with runtime under 120 minutes; "
             "explanation references tone or pacing."
