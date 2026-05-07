@@ -119,6 +119,10 @@ Two committed sample trajectories live in
   in action; `run_python` actually executes against the catalog data the
   search tool returned.
 
+For a guided tour of how to use the harness — task format,
+configurations, CLI reference, extending the tool surface, common
+gotchas — see the **[user manual in `docs/manual/`](docs/manual/README.md)**.
+
 ---
 
 ## Architecture
