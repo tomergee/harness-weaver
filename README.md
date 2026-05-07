@@ -50,15 +50,28 @@ surface and the bundled example trajectories don't require one.
 git clone https://github.com/tomergee/harness-weaver
 cd harness-weaver
 pip install -e ".[dev]"
-make check                                 # 111 tests, ~96% coverage
+make check                                 # 149 tests, ~94% coverage
 
 harness-weaver list-configs                # see the three built-in configurations
 ```
 
-The three CLI subcommands (`run`, `compare`, `eval`) wire the production
-stack and currently fail with a clear `NotImplementedError` because the
-`RealAgentRunner` (Claude Agent SDK + MCP) isn't wired up yet — that's the
-next deliverable. To exercise the harness end-to-end *today*, drive
+### Running against the live model
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+harness-weaver run examples/tasks/discovery-mood-tense.json \
+    --config single-agent-basic
+# trajectory written to runs/discovery-mood-tense.single-agent-basic.json
+```
+
+`run`, `compare`, and `eval` use `RealAgentRunner`, which drives
+`claude-agent-sdk`'s `query()` against an in-process MCP server that
+wraps our tool registry — see [ADR-0004](docs/adr/0004-mcp-transport-in-process.md)
+for the transport choice.
+
+### Running without an API key
+
+To exercise the harness end-to-end without a model in the loop, drive
 `Harness` directly with a `FakeAgentRunner`:
 
 ```python
