@@ -19,9 +19,11 @@ from harness_weaver.tools.catalog_tools import (
     UserHistoryTool,
 )
 from harness_weaver.tools.registry import ToolRegistry
+from harness_weaver.tools.sandbox import RunPythonTool
 
 __all__ = [
     "GetMetadataTool",
+    "RunPythonTool",
     "SearchTitlesTool",
     "Tool",
     "ToolError",
