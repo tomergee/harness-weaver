@@ -22,7 +22,12 @@ import json
 from pathlib import Path
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+ORCHESTRATOR_AGENT_ID = "orchestrator"
+"""Reserved identifier the runner uses for the top-level agent. Workers
+cannot use this name; the runner relies on it being unique to look up
+the orchestrator's allow-list."""
 
 
 class AgentDefinition(BaseModel):
@@ -63,6 +68,28 @@ class Configuration(BaseModel):
     @property
     def is_multi_agent(self) -> bool:
         return bool(self.agents)
+
+    @model_validator(mode="after")
+    def _check_agent_role_names(self) -> Self:
+        """Reject reserved or duplicate worker role names.
+
+        The runner's per-agent allow-list keys on ``role_name`` plus the
+        reserved ``ORCHESTRATOR_AGENT_ID``. A worker named ``"orchestrator"``
+        would silently overwrite the orchestrator's own entry; two workers
+        with the same name would silently collapse into one allow-list.
+        Both are confusing failure modes, so we reject them at construction.
+        """
+        seen: set[str] = set()
+        for agent in self.agents:
+            if agent.role_name == ORCHESTRATOR_AGENT_ID:
+                raise ValueError(
+                    f"agent role_name {ORCHESTRATOR_AGENT_ID!r} is reserved for the "
+                    f"top-level orchestrator"
+                )
+            if agent.role_name in seen:
+                raise ValueError(f"duplicate agent role_name: {agent.role_name!r}")
+            seen.add(agent.role_name)
+        return self
 
     @classmethod
     def from_path(cls, path: Path) -> Self:
@@ -164,6 +191,7 @@ def builtin_configurations() -> list[Configuration]:
 
 __all__ = [
     "MULTI_AGENT_DISCOVERY_EXPLAINER",
+    "ORCHESTRATOR_AGENT_ID",
     "SINGLE_AGENT_BASIC",
     "SINGLE_AGENT_WITH_SANDBOX",
     "AgentDefinition",

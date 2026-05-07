@@ -7,7 +7,7 @@ that wants catalog access takes a :class:`Catalog` in its constructor.
 
 import csv
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Self
@@ -49,6 +49,12 @@ class SearchFilter:
 
     Kept separate from the tool's pydantic input model so the Catalog is
     independently testable without dragging the tool layer in.
+
+    Lowercased forms of ``query`` and ``genres`` are precomputed in
+    ``__post_init__`` so the per-movie ``matches`` call doesn't redo that
+    work on every iteration. The catalog also stores a precomputed
+    lowercase blob per movie (see :class:`Catalog`); :meth:`matches`
+    accepts it as an optional override to avoid recomputing per movie.
     """
 
     query: str | None = None
@@ -60,15 +66,32 @@ class SearchFilter:
     min_rating: float | None = None
     max_rating: float | None = None
 
-    def matches(self, movie: Movie) -> bool:
-        if self.query is not None:
-            q = self.query.lower()
-            if q not in movie.title.lower() and q not in movie.overview.lower():
-                return False
+    # Precomputed in __post_init__; not part of the public surface.
+    _query_lower: str | None = field(init=False, repr=False, compare=False, default=None)
+    _genres_lower: frozenset[str] | None = field(
+        init=False, repr=False, compare=False, default=None
+    )
+
+    def __post_init__(self) -> None:
+        # Frozen dataclass: object.__setattr__ is the documented escape hatch.
+        object.__setattr__(self, "_query_lower", self.query.lower() if self.query else None)
         if self.genres is not None:
-            wanted = {g.lower() for g in self.genres}
-            have = {g.lower() for g in movie.genres}
-            if not wanted & have:
+            object.__setattr__(self, "_genres_lower", frozenset(g.lower() for g in self.genres))
+
+    def matches(self, movie: Movie, *, searchable_text: str | None = None) -> bool:
+        """Test a movie against this filter.
+
+        ``searchable_text``: optional precomputed lowercase concatenation of
+        title and overview. The Catalog passes this in to avoid recomputing
+        per call; callers that don't have one fall back to computing it.
+        """
+        if self._query_lower is not None:
+            haystack = searchable_text or _searchable_blob(movie)
+            if self._query_lower not in haystack:
+                return False
+        if self._genres_lower is not None:
+            have = frozenset(g.lower() for g in movie.genres)
+            if not self._genres_lower & have:
                 return False
         if self.min_year is not None and movie.year < self.min_year:
             return False
@@ -81,6 +104,13 @@ class SearchFilter:
         if self.min_rating is not None and movie.rating < self.min_rating:
             return False
         return not (self.max_rating is not None and movie.rating > self.max_rating)
+
+
+def _searchable_blob(movie: Movie) -> str:
+    """Build the lowercase haystack for substring search. Used as a fallback
+    when the Catalog's precomputed index isn't available (e.g. someone calls
+    ``SearchFilter.matches`` outside the Catalog)."""
+    return f"{movie.title}\n{movie.overview}".lower()
 
 
 SortKey = str  # "rating" | "year" | "runtime" | "title"
@@ -106,6 +136,12 @@ class Catalog:
             if m.id in self._movies:
                 raise ValueError(f"duplicate movie id: {m.id}")
             self._movies[m.id] = m
+
+        # Precomputed lowercase haystack per movie; used by SearchFilter.matches
+        # so we don't redo `title.lower() + overview.lower()` for every search.
+        self._searchable: dict[str, str] = {
+            mid: _searchable_blob(m) for mid, m in self._movies.items()
+        }
 
         self._ratings_by_user: dict[str, list[RatingEvent]] = {}
         for r in ratings:
@@ -148,7 +184,11 @@ class Catalog:
         if limit <= 0:
             raise ValueError(f"limit must be positive, got {limit}")
         attr = _SORT_KEYS[sort_by]
-        matched = [m for m in self._movies.values() if criteria.matches(m)]
+        matched = [
+            m
+            for mid, m in self._movies.items()
+            if criteria.matches(m, searchable_text=self._searchable[mid])
+        ]
         matched.sort(key=lambda m: getattr(m, attr), reverse=descending)
         return matched[:limit]
 

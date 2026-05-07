@@ -266,3 +266,52 @@ class TestHistory:
         catalog = Catalog([_movie("m1")], [_rating("u1", "m1")])
         with pytest.raises(ValueError, match="limit"):
             catalog.history_for("u1", limit=-1)
+
+
+class TestSearchFilterPrecomputation:
+    """SearchFilter pre-lowercases query and genres in __post_init__ and
+    accepts a precomputed haystack from Catalog (gemini-code-assist
+    review on PR #2). These tests pin the optimization invariants."""
+
+    def test_query_lowercased_once(self) -> None:
+        flt = SearchFilter(query="Mixed Case Query")
+        assert flt._query_lower == "mixed case query"
+
+    def test_genres_lowercased_into_frozenset(self) -> None:
+        flt = SearchFilter(genres=("Sci-Fi", "Action"))
+        assert flt._genres_lower == frozenset({"sci-fi", "action"})
+
+    def test_no_query_means_no_haystack_built(self, varied_catalog: Catalog) -> None:
+        # When query is None, matches() should not touch searchable_text at all.
+        # We pass a deliberately bogus haystack to verify it's ignored.
+        flt = SearchFilter(genres=("sci-fi",))
+        movie = next(iter(varied_catalog.all_movies()))
+        # Without a query, only genre/year/etc. matter — bogus haystack is irrelevant.
+        flt.matches(movie, searchable_text="ignored-bogus-text")
+        # No assertion needed; just exercising the no-query path doesn't blow up.
+
+    def test_searchable_text_override_is_used(self) -> None:
+        flt = SearchFilter(query="hello")
+        movie = Movie(
+            id="m1",
+            title="Different Title",
+            year=2000,
+            runtime_minutes=100,
+            genres=["Drama"],
+            rating=7.0,
+            vote_count=1,
+            overview="No match here.",
+        )
+        # Override haystack contains "hello" — should match even though
+        # neither title nor overview does.
+        assert flt.matches(movie, searchable_text="this contains hello somewhere")
+        # Without the override, falls back to computing from the movie.
+        assert not flt.matches(movie)
+
+    def test_catalog_search_uses_precomputed_index(self, varied_catalog: Catalog) -> None:
+        # Sanity check: searches that hit the query path still return correct
+        # results once the precomputed index is in play.
+        results = varied_catalog.search(SearchFilter(query="Tense"), limit=10)
+        assert {m.id for m in results} == {"m5"}
+        results = varied_catalog.search(SearchFilter(query="suspense"), limit=10)
+        assert {m.id for m in results} == {"m5"}

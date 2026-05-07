@@ -217,11 +217,14 @@ class UserHistoryTool(Tool[UserHistoryInput, UserHistoryOutput]):
         self._catalog = catalog
 
     def execute(self, args: UserHistoryInput) -> UserHistoryOutput:
-        events = self._catalog.history_for(args.user_id, limit=args.limit)
+        # Fetch all events once, then slice locally — calling history_for twice
+        # (once with limit, once without for the count) doubles the list copy.
+        all_events = self._catalog.history_for(args.user_id)
         # If the user is unknown, history_for returns []; surface that as a
         # ToolError so the agent doesn't silently get an empty answer to a typo.
-        if not events and args.user_id not in self._catalog.known_users:
+        if not all_events and args.user_id not in self._catalog.known_users:
             raise ToolError(f"no history for user {args.user_id!r}")
+        events = all_events if args.limit is None else all_events[: args.limit]
         entries: list[HistoryEntry] = []
         for ev in events:
             movie = self._catalog.get(ev.movie_id)
@@ -237,7 +240,7 @@ class UserHistoryTool(Tool[UserHistoryInput, UserHistoryOutput]):
         return UserHistoryOutput(
             user_id=args.user_id,
             entries=entries,
-            total_events=len(self._catalog.history_for(args.user_id)),
+            total_events=len(all_events),
         )
 
 

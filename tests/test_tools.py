@@ -151,6 +151,28 @@ class TestUserHistoryTool:
         with pytest.raises(ToolError, match="invalid arguments"):
             tool.call({"user_id": "user-a", "limit": -1})
 
+    def test_history_for_called_once_per_execute(
+        self, small_catalog: Catalog, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression test for gemini-code-assist review on PR #2: execute()
+        used to call ``history_for`` twice (once for the limited list, once
+        for the count). Pinning to a single call so we can't backslide."""
+        calls = 0
+        original = small_catalog.history_for
+
+        def counting_history_for(*args: object, **kwargs: object) -> object:
+            nonlocal calls
+            calls += 1
+            return original(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(small_catalog, "history_for", counting_history_for)
+        tool = UserHistoryTool(small_catalog)
+        result = tool.call({"user_id": "user-a", "limit": 1})
+        assert calls == 1
+        # Output is still correct: the slice happens locally on the unfiltered list.
+        assert len(result["entries"]) == 1
+        assert result["total_events"] == 2
+
 
 # --- ToolRegistry --------------------------------------------------------
 

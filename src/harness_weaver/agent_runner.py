@@ -20,7 +20,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from harness_weaver.configurations import Configuration
+from harness_weaver.configurations import ORCHESTRATOR_AGENT_ID, Configuration
 from harness_weaver.tools import ToolError, ToolRegistry
 from harness_weaver.trajectory import Trajectory, TrajectoryRecorder
 
@@ -74,7 +74,7 @@ class RealAgentRunner(AgentRunner):
 @dataclass(frozen=True)
 class _Say:
     text: str
-    agent_id: str = "orchestrator"
+    agent_id: str = ORCHESTRATOR_AGENT_ID
     kind: Literal["say"] = "say"
 
 
@@ -82,33 +82,36 @@ class _Say:
 class _Call:
     tool: str
     arguments: dict[str, Any]
-    agent_id: str = "orchestrator"
+    agent_id: str = ORCHESTRATOR_AGENT_ID
     kind: Literal["call"] = "call"
 
 
 @dataclass(frozen=True)
 class _Answer:
     text: str
-    agent_id: str = "orchestrator"
+    agent_id: str = ORCHESTRATOR_AGENT_ID
     kind: Literal["answer"] = "answer"
 
 
 ScriptStep = _Say | _Call | _Answer
 
 
-def say(text: str, *, agent_id: str = "orchestrator") -> _Say:
+def say(text: str, *, agent_id: str = ORCHESTRATOR_AGENT_ID) -> _Say:
     """Script a piece of assistant text."""
     return _Say(text=text, agent_id=agent_id)
 
 
 def call(
-    tool: str, arguments: dict[str, Any] | None = None, *, agent_id: str = "orchestrator"
+    tool: str,
+    arguments: dict[str, Any] | None = None,
+    *,
+    agent_id: str = ORCHESTRATOR_AGENT_ID,
 ) -> _Call:
     """Script a tool call. The registry actually executes it."""
     return _Call(tool=tool, arguments=arguments or {}, agent_id=agent_id)
 
 
-def answer(text: str, *, agent_id: str = "orchestrator") -> _Answer:
+def answer(text: str, *, agent_id: str = ORCHESTRATOR_AGENT_ID) -> _Answer:
     """Script the final answer that terminates the run."""
     return _Answer(text=text, agent_id=agent_id)
 
@@ -156,7 +159,12 @@ class FakeAgentRunner(AgentRunner):
 
     @staticmethod
     def _build_allowlist(configuration: Configuration) -> dict[str, frozenset[str]]:
-        out: dict[str, frozenset[str]] = {"orchestrator": frozenset(configuration.allowed_tools)}
+        # Configuration.model_validator guarantees no agent uses
+        # ORCHESTRATOR_AGENT_ID and that role names are unique, so this map
+        # has no risk of silent overwrite.
+        out: dict[str, frozenset[str]] = {
+            ORCHESTRATOR_AGENT_ID: frozenset(configuration.allowed_tools)
+        }
         for agent in configuration.agents:
             out[agent.role_name] = frozenset(agent.allowed_tools)
         return out

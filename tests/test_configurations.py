@@ -74,3 +74,45 @@ class TestValidation:
         cfg = SINGLE_AGENT_BASIC
         with pytest.raises(ValueError, match="frozen"):
             cfg.name = "different"  # type: ignore[misc]
+
+
+class TestRoleNameValidation:
+    """Reject worker role names that would collide with the orchestrator
+    or with each other (gemini-code-assist review on PR #2)."""
+
+    def test_worker_named_orchestrator_rejected(self) -> None:
+        with pytest.raises(ValueError, match="reserved"):
+            Configuration(
+                name="bad",
+                description="x",
+                system_prompt="x",
+                allowed_tools=(),
+                agents=(
+                    AgentDefinition(
+                        role_name="orchestrator",  # collides with the top-level agent
+                        system_prompt="x",
+                        allowed_tools=("search_titles",),
+                    ),
+                ),
+            )
+
+    def test_duplicate_worker_role_names_rejected(self) -> None:
+        with pytest.raises(ValueError, match="duplicate"):
+            Configuration(
+                name="bad",
+                description="x",
+                system_prompt="x",
+                allowed_tools=(),
+                agents=(
+                    AgentDefinition(
+                        role_name="discovery",
+                        system_prompt="x",
+                        allowed_tools=("search_titles",),
+                    ),
+                    AgentDefinition(
+                        role_name="discovery",  # second one
+                        system_prompt="x",
+                        allowed_tools=("get_metadata",),
+                    ),
+                ),
+            )
