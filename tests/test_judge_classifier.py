@@ -107,6 +107,29 @@ class TestInfiniteLoop:
         )
         assert FailureMode.INFINITE_LOOP in classify(traj)
 
+    def test_nested_dict_order_does_not_break_detection(self) -> None:
+        """Regression for gemini-code-assist review on PR #4: the loop
+        signature must canonicalize *recursively*, not just at the
+        top level. ``repr(sorted(items()))`` sorted top-level keys but
+        left nested dicts ordered by insertion, so a nested filter
+        with shuffled keys silently broke the comparison."""
+        traj = _trajectory(
+            ToolUse(
+                tool_name="search_titles",
+                arguments={"filter": {"genre": "Thriller", "year_min": 2015}},
+            ),
+            ToolUse(
+                tool_name="search_titles",
+                arguments={"filter": {"year_min": 2015, "genre": "Thriller"}},
+            ),
+            ToolUse(
+                tool_name="search_titles",
+                arguments={"filter": {"genre": "Thriller", "year_min": 2015}},
+            ),
+            final_answer="something",
+        )
+        assert FailureMode.INFINITE_LOOP in classify(traj)
+
 
 class TestRefusalAndOffTask:
     def test_refusal_phrases_flagged(self) -> None:

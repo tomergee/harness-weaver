@@ -203,13 +203,24 @@ def _all(check: Any) -> str:
 
 
 def _all_search_hits(trajectory: Trajectory) -> list[dict[str, Any]]:
-    """Pull every ``hit`` returned by any successful ``search_titles``
-    tool result; we use these as the ground truth for criteria checks."""
+    """Pull every ``hit`` from any tool result that carries a ``hits`` list.
+
+    ``hits`` is the convention for "list of catalog matches" —
+    :class:`SearchTitlesTool` ships it; new retrieval-shaped tools
+    that want their results fed into criteria checks should follow
+    the same shape (e.g. a ``find_titles`` tool returning
+    ``{"hits": [...], "total_matched": N}``).
+
+    We deliberately do *not* gate on ``tool_name == "search_titles"``
+    so the structural layer doesn't have to be edited every time a
+    new search-shaped tool is added. If finer control is needed, a
+    future ``Task.success_criteria`` could carry an explicit
+    ``hits_from`` list of tool names; we'll add that when a real use
+    case demands it.
+    """
     hits: list[dict[str, Any]] = []
     for event in trajectory.events:
-        if not isinstance(event, ToolResult):
-            continue
-        if event.tool_name != "search_titles" or event.result is None:
+        if not isinstance(event, ToolResult) or event.result is None:
             continue
         result_hits = event.result.get("hits")
         if isinstance(result_hits, list):

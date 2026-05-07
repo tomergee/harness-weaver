@@ -16,6 +16,7 @@ diagnostics that don't need a model.
 
 from __future__ import annotations
 
+import json
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -147,9 +148,7 @@ def _has_infinite_loop(trajectory: Trajectory) -> bool:
     for event in trajectory.events:
         if not isinstance(event, ToolUse):
             continue
-        # Use sorted JSON-ish repr so dict iteration order doesn't break
-        # the comparison.
-        signature = (event.tool_name, repr(sorted(event.arguments.items())))
+        signature = (event.tool_name, _canonical_args(event.arguments))
         if signature == last_signature:
             streak += 1
             if streak >= _INFINITE_LOOP_REPEATS:
@@ -158,6 +157,20 @@ def _has_infinite_loop(trajectory: Trajectory) -> bool:
             streak = 1
             last_signature = signature
     return False
+
+
+def _canonical_args(arguments: dict[str, object]) -> str:
+    """Stable string form of tool arguments for equality comparison.
+
+    ``json.dumps(..., sort_keys=True)`` recursively sorts nested dicts,
+    so two calls that differ only in key insertion order — at any
+    depth — produce the same canonical form. ``default=str`` is a
+    defensive fallback for the rare case where a value isn't natively
+    JSON-serializable; we don't expect this in practice (the SDK
+    arrives at us as JSON in the first place) but it keeps loop
+    detection from blowing up on unexpected types.
+    """
+    return json.dumps(arguments, sort_keys=True, default=str)
 
 
 def _is_refusal(trajectory: Trajectory) -> bool:

@@ -144,6 +144,33 @@ class TestSuccessCriteria:
         assert summary.success_criteria["min_rating"] == "unknown"
         assert summary.success_criteria["must_include_genre"] == "unknown"
 
+    def test_hits_from_any_tool_result_count_for_criteria(self, task_with_criteria: Task) -> None:
+        """Regression for gemini-code-assist review on PR #4: criteria
+        evaluation should not be hardcoded to ``search_titles``. Any
+        tool result whose payload carries a ``hits`` list contributes
+        to the check, so future search-shaped tools (``find_titles``,
+        ``semantic_search``, ...) work without editing the structural
+        layer."""
+        traj = _trajectory(
+            ToolUse(tool_name="find_titles_v2", arguments={}),
+            ToolResult(
+                tool_name="find_titles_v2",
+                result={
+                    "hits": [{"runtime_minutes": 110, "rating": 8.5, "genres": ["Thriller"]}],
+                    "total_matched": 1,
+                },
+                duration_seconds=0.01,
+            ),
+            FinalAnswer(text="A reasonable recommendation grounded in the catalog."),
+        )
+        summary = TrajectorySummary.of(traj, task=task_with_criteria)
+        # The criteria evaluator picked up the hit even though the tool
+        # isn't called search_titles.
+        assert summary.success_criteria["min_results"] == "pass"
+        assert summary.success_criteria["max_runtime_minutes"] == "pass"
+        assert summary.success_criteria["min_rating"] == "pass"
+        assert summary.success_criteria["must_include_genre"] == "pass"
+
 
 class TestStructuralReport:
     def test_task_id_mismatch_rejected(self) -> None:
