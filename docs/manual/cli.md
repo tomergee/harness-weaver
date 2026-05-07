@@ -107,11 +107,17 @@ harness-weaver eval PACK [OPTIONS]
 | `--model` | `None` | Override pinned model. |
 | `--output-dir` | `runs/` | Per-task trajectories land here. |
 
-Per-task trajectories are written to `output_dir`. The aggregate judge
-report lands with the judge integration.
+Output:
+* `{task_id}.{config_name}.json` — one trajectory per task in the pack.
+* `{pack_name}.{config_name}.eval.md` — aggregate markdown report
+  covering completion rate, failure-mode frequencies, success-criteria
+  pass rates, tool-call statistics, total duration, and total cost (when
+  the SDK reported it).
 
 A TaskPack is just `{name, description, tasks: [Task, Task, ...]}`. See
 [`src/harness_weaver/task.py`](../../src/harness_weaver/task.py).
+[`examples/packs/discovery.json`](../../examples/packs/discovery.json)
+is the bundled example.
 
 ## `harness-weaver list-configs`
 

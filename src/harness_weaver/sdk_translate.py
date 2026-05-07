@@ -189,9 +189,14 @@ class SdkMessageTranslator:
         message: sdk.ResultMessage,
         recorder: TrajectoryRecorder,
     ) -> None:
-        # ResultMessage.result holds the final assistant text.
+        # ResultMessage.result holds the final assistant text; cost and
+        # turn count land on the trajectory's top-level fields.
         if message.result:
             recorder.final_answer(message.result)
+        recorder.set_cost(
+            total_cost_usd=message.total_cost_usd,
+            num_turns=message.num_turns,
+        )
 
     def _agent_id_for(self, parent_tool_use_id: str | None) -> str:
         if parent_tool_use_id is None:

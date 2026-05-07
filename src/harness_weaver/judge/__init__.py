@@ -16,6 +16,11 @@ pre-computed scaffolding, so the model gets the counts and reasons
 about them rather than re-counting from raw events.
 """
 
+from harness_weaver.judge.aggregate import (
+    PackSummary,
+    PerTaskSummary,
+    render_pack_markdown,
+)
 from harness_weaver.judge.classifier import FailureMode, classify
 from harness_weaver.judge.llm import (
     DEFAULT_JUDGE_MODEL,
@@ -37,8 +42,11 @@ __all__ = [
     "InspectAILlmJudge",
     "Judge",
     "JudgeVerdict",
+    "PackSummary",
+    "PerTaskSummary",
     "StructuralReport",
     "TrajectorySummary",
     "classify",
     "render_markdown",
+    "render_pack_markdown",
 ]

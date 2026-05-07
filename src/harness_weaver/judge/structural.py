@@ -37,6 +37,8 @@ class TrajectorySummary:
     tool_call_count: int
     tool_error_count: int
     duration_seconds: float
+    total_cost_usd: float | None
+    num_turns: int | None
     has_final_answer: bool
     final_answer_chars: int
     failure_modes: list[FailureMode]
@@ -58,6 +60,8 @@ class TrajectorySummary:
             tool_call_count=trajectory.tool_call_count,
             tool_error_count=tool_errors,
             duration_seconds=trajectory.duration_seconds,
+            total_cost_usd=trajectory.total_cost_usd,
+            num_turns=trajectory.num_turns,
             has_final_answer=trajectory.final_answer is not None,
             final_answer_chars=len(trajectory.final_answer or ""),
             failure_modes=classify(trajectory, task=task),
@@ -109,6 +113,8 @@ def render_markdown(report: StructuralReport) -> str:
         f"| Tool calls            | {a.tool_call_count} | {b.tool_call_count} |",
         f"| Tool errors           | {a.tool_error_count} | {b.tool_error_count} |",
         f"| Duration (seconds)    | {a.duration_seconds:.2f} | {b.duration_seconds:.2f} |",
+        f"| Cost (USD)            | {_money(a.total_cost_usd)} | {_money(b.total_cost_usd)} |",
+        f"| Turns                 | {_or_dash(a.num_turns)} | {_or_dash(b.num_turns)} |",
         f"| Final answer present  | {_yn(a.has_final_answer)} | {_yn(b.has_final_answer)} |",
         f"| Final answer chars    | {a.final_answer_chars} | {b.final_answer_chars} |",
         f"| Failure modes         | {_modes(a.failure_modes)} | {_modes(b.failure_modes)} |",
@@ -135,6 +141,22 @@ def render_markdown(report: StructuralReport) -> str:
 
 def _yn(value: bool) -> str:
     return "yes" if value else "no"
+
+
+def _money(value: float | None) -> str:
+    """Render a USD cost or ``-`` when not tracked.
+
+    Six decimal places — see the matching ``_money`` in
+    :mod:`.aggregate` for the precision rationale. Kept in sync with
+    that copy; refactor into a shared helper if a third callsite shows up.
+    """
+    if value is None:
+        return "-"
+    return f"${value:.6f}"
+
+
+def _or_dash(value: int | None) -> str:
+    return "-" if value is None else str(value)
 
 
 def _modes(modes: list[FailureMode]) -> str:

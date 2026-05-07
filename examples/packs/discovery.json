@@ -1,0 +1,32 @@
+{
+  "name": "discovery",
+  "description": "Two recommendation prompts that span the harness's range: a mood-based discovery prompt that exercises user_history + search_titles, and an analytical prompt that benefits from run_python.",
+  "tasks": [
+    {
+      "task_id": "discovery-mood-tense",
+      "user_prompt": "Find me a tense thriller under two hours. I want something modern, ideally something I haven't seen.",
+      "user_id": "user-001",
+      "expected_outcome": "Recommends one or more thriller titles with runtime < 120 minutes that the user hasn't already rated. Justification references tone, pacing, or specific elements; cites concrete catalog facts (year, runtime, rating).",
+      "success_criteria": {
+        "min_results": 1,
+        "max_runtime_minutes": 120,
+        "must_include_genre": "Thriller"
+      },
+      "tags": ["discovery", "mood-based"]
+    },
+    {
+      "task_id": "analytical-runtime-rating",
+      "user_prompt": "Find sci-fi movies between 90 and 120 minutes long with a rating above 8.0, sorted by runtime descending. Show the top 3.",
+      "expected_outcome": "Returns up to 3 sci-fi titles, each with runtime in [90, 120] minutes and rating > 8.0, ordered by runtime descending. Lists are precise — wrong runtime, wrong genre, or rating <= 8.0 counts as a failure. Configurations with run_python should reach this answer more reliably than ones without.",
+      "success_criteria": {
+        "min_results": 1,
+        "max_results": 3,
+        "min_runtime_minutes": 90,
+        "max_runtime_minutes": 120,
+        "min_rating": 8.0,
+        "must_include_genre": "Sci-Fi"
+      },
+      "tags": ["analytical", "runtime-rating"]
+    }
+  ]
+}

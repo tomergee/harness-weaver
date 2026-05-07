@@ -219,16 +219,35 @@ def eval_(
 ) -> None:
     """Evaluate one configuration against a full task pack.
 
-    Per-task trajectories are written to ``output_dir``. The aggregate
-    judge report lands with the judge integration.
+    Per-task trajectories land in ``output_dir`` as
+    ``{task_id}.{config_name}.json``; a pack-level markdown summary
+    lands as ``{pack_name}.{config_name}.eval.md`` and aggregates
+    completion rate, failure-mode frequencies, success-criteria pass
+    rates, tool-call statistics, total duration, and total cost when
+    the SDK reported it.
     """
+    from harness_weaver.judge import PackSummary, render_pack_markdown
+
     cfg = _resolve_config(config, model)
     pack_obj = TaskPack.from_path(pack)
     harness = _build_harness()
+    trajectories = []
     for task_obj in pack_obj.tasks:
         trajectory = harness.run(task_obj, cfg)
         out_path = output_dir / f"{trajectory.task_id}.{cfg.name}.json"
         _write_trajectory(trajectory.model_dump_json(indent=2), out_path)
+        trajectories.append(trajectory)
+
+    summary = PackSummary.of(trajectories, pack=pack_obj, configuration_name=cfg.name)
+    summary_path = output_dir / f"{pack_obj.name}.{cfg.name}.eval.md"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(render_pack_markdown(summary), encoding="utf-8")
+    console.print(f"pack summary written to [bold]{summary_path}[/bold]")
+    console.print(
+        f"[bold]completed:[/bold] {summary.completed_count}/{summary.task_count} "
+        f"({summary.completion_rate:.0%})  "
+        f"[dim]cost {summary.total_cost_usd if summary.total_cost_usd is not None else '-'}[/dim]"
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover
