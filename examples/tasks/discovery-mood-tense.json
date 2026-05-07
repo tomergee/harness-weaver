@@ -1,0 +1,12 @@
+{
+  "task_id": "discovery-mood-tense",
+  "user_prompt": "Find me a tense thriller under two hours. I want something modern, ideally something I haven't seen.",
+  "user_id": "user-001",
+  "expected_outcome": "Recommends one or more thriller titles with runtime < 120 minutes that the user hasn't already rated. Justification references tone, pacing, or specific elements; cites concrete catalog facts (year, runtime, rating).",
+  "success_criteria": {
+    "min_results": 1,
+    "max_runtime_minutes": 120,
+    "must_include_genre": "Thriller"
+  },
+  "tags": ["discovery", "mood-based"]
+}
