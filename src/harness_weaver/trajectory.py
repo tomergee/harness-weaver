@@ -93,6 +93,24 @@ class Trajectory(BaseModel):
         default=None,
         description="The last FinalAnswer event's text; None if the run did not terminate cleanly.",
     )
+    total_cost_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Total provider cost for the run, in USD, when the SDK reported one. "
+            "None for fake/scripted runs and for SDK paths that don't surface "
+            "cost (e.g. older inspect-ai versions). Trajectories from different "
+            "providers may have different cost-accounting semantics — treat the "
+            "value as advisory, not a billing record."
+        ),
+    )
+    num_turns: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Number of model turns the SDK reported for this run. None when not available."
+        ),
+    )
 
     @property
     def tool_calls(self) -> list[ToolUse]:
@@ -125,6 +143,8 @@ class TrajectoryRecorder:
         self._started_at = _now()
         self._events: list[TrajectoryEvent] = []
         self._final_answer: str | None = None
+        self._total_cost_usd: float | None = None
+        self._num_turns: int | None = None
 
     def record(self, event: TrajectoryEvent) -> None:
         self._events.append(event)
@@ -168,6 +188,17 @@ class TrajectoryRecorder:
     def final_answer(self, text: str, *, agent_id: str = "orchestrator") -> None:
         self.record(FinalAnswer(text=text, agent_id=agent_id))
 
+    def set_cost(self, *, total_cost_usd: float | None, num_turns: int | None = None) -> None:
+        """Attach provider-reported cost and turn count to the trajectory.
+
+        Called by the SDK translator when a ``ResultMessage`` arrives.
+        Both values land verbatim on the finalized :class:`Trajectory`;
+        re-calling this overwrites earlier values (the SDK can emit
+        multiple ResultMessages on retry, and the last one wins).
+        """
+        self._total_cost_usd = total_cost_usd
+        self._num_turns = num_turns
+
     def finish(self) -> Trajectory:
         return Trajectory(
             task_id=self._task_id,
@@ -176,6 +207,8 @@ class TrajectoryRecorder:
             completed_at=_now(),
             events=list(self._events),
             final_answer=self._final_answer,
+            total_cost_usd=self._total_cost_usd,
+            num_turns=self._num_turns,
         )
 
 

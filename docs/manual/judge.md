@@ -143,15 +143,60 @@ print(verdict.reasoning)
 For tests, swap `InspectAILlmJudge` for `FixedJudge` — same protocol,
 canned verdict, no API call.
 
+## Pack-level eval
+
+`harness-weaver eval` runs one configuration over a whole TaskPack
+(`examples/packs/discovery.json` is the bundled example) and emits
+both per-task trajectories and an aggregate markdown report:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+harness-weaver eval examples/packs/discovery.json \
+    --config single-agent-basic \
+    --model claude-haiku-4-5-20251001
+```
+
+The pack report (`{pack_name}.{config_name}.eval.md`) covers:
+
+* **Aggregate** — task count, completion rate, total/mean/median tool
+  calls, total duration, total cost (when the SDK reported it).
+* **Failure modes** — frequency table of the modes that fired across
+  the pack. Section omitted entirely when nothing fired.
+* **Success criteria** — pass rate per criterion, with "applicable"
+  excluding runs the structural layer couldn't evaluate, so the rate
+  isn't dragged down by `"unknown"` outcomes.
+* **Per-task** — one row per trajectory: completion, failure-mode
+  tags, tool calls, duration, cost.
+
+Output is deterministic; same input produces the same markdown
+line-for-line, so reports diff cleanly across runs. See
+[`examples/output/discovery.single-agent-basic.eval.md`](../../examples/output/discovery.single-agent-basic.eval.md)
+for a real Haiku run.
+
+## Cost tracking
+
+When the live SDK runs, the trajectory captures the provider-reported
+`total_cost_usd` and `num_turns` from the terminal `ResultMessage`.
+The structural report shows them in the comparison table; the pack
+report sums them. A `Trajectory` from a `FakeAgentRunner` has both
+fields as `None` (no model call was made), and reports render `-`
+for those columns.
+
+Cost also flows into the `cost_blowup` failure-mode rule: when real
+cost is available, the rule fires above $0.50 (configurable in
+`classifier.py`). When the SDK didn't report a cost — older SDK
+versions, fake runs — the rule falls back to a tool-call-count proxy
+(>50 calls) so it's never silently disabled.
+
 ## What's not yet here
 
 * **Calibration** — the README's design notes promise a small
   human-rated set the judge gets calibrated against. Not built yet.
   When it lands, the judge's `confidence` field becomes meaningful
   beyond self-report.
-* **Aggregation across a TaskPack** — `harness-weaver eval` writes
-  per-task trajectories but doesn't yet aggregate verdicts into a
-  pack-level report.
+* **Pack-level LLM verdicts** — the per-task `--judge-model` produces
+  pairwise verdicts; a pack-level "config A beats config B on N of M
+  tasks" rollup is a natural next step but not yet wired.
 * **Judging without comparison** — the current rubric is intrinsically
   pairwise (a vs b). A single-trajectory quality verdict is a
   separate prompt and not yet implemented.

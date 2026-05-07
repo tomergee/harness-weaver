@@ -78,6 +78,7 @@ class FailureMode(StrEnum):
 # can reference them rather than hard-coding numbers in two places.
 _INFINITE_LOOP_REPEATS = 3
 _COST_BLOWUP_TOOL_CALLS = 50
+_COST_BLOWUP_USD = 0.50
 _OFF_TASK_MIN_ANSWER_CHARS = 30
 
 _REFUSAL_MARKERS: tuple[str, ...] = (
@@ -188,6 +189,16 @@ def _is_off_task(trajectory: Trajectory) -> bool:
 
 
 def _is_cost_blowup(trajectory: Trajectory) -> bool:
+    """Real cost when the SDK reported one; tool-call count as a fallback proxy.
+
+    The proxy fires when the SDK didn't surface a cost (FakeAgentRunner,
+    older SDK versions) but the agent obviously thrashed — > 50 tool calls
+    is rarely intentional. When real cost *is* available, we use only it,
+    because a multi-agent run can legitimately exceed the proxy threshold
+    while staying well under the dollar cap.
+    """
+    if trajectory.total_cost_usd is not None:
+        return trajectory.total_cost_usd > _COST_BLOWUP_USD
     return trajectory.tool_call_count > _COST_BLOWUP_TOOL_CALLS
 
 
