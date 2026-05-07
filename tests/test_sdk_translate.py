@@ -293,3 +293,90 @@ class TestUnknownMessages:
         # forward-compatibility: future SDK message types are dropped silently.
         SdkMessageTranslator().translate("not a message", rec)  # type: ignore[arg-type]
         assert len(rec.finish().events) == 0
+
+
+class TestCustomServerNamePrefix:
+    """The translator must strip prefixes for whatever server name was
+    used by the runner — not just the default (gemini-code-assist
+    review on PR #3)."""
+
+    def test_default_prefix_strips(self) -> None:
+        rec = _record()
+        SdkMessageTranslator().translate(
+            _assistant(
+                sdk.ToolUseBlock(id="t1", name="mcp__harness_weaver__search_titles", input={})
+            ),
+            rec,
+        )
+        traj = rec.finish()
+        assert traj.events[0].tool_name == "search_titles"  # type: ignore[union-attr]
+
+    def test_custom_prefix_strips(self) -> None:
+        rec = _record()
+        translator = SdkMessageTranslator(server_name="alt_srv")
+        translator.translate(
+            _assistant(sdk.ToolUseBlock(id="t1", name="mcp__alt_srv__search_titles", input={})),
+            rec,
+        )
+        traj = rec.finish()
+        assert traj.events[0].tool_name == "search_titles"  # type: ignore[union-attr]
+
+    def test_default_translator_does_not_strip_custom_prefix(self) -> None:
+        # Confirms the prefix check is exact, not greedy. The default
+        # translator should NOT strip a prefix it wasn't configured for.
+        rec = _record()
+        SdkMessageTranslator().translate(
+            _assistant(sdk.ToolUseBlock(id="t1", name="mcp__alt_srv__search_titles", input={})),
+            rec,
+        )
+        traj = rec.finish()
+        assert traj.events[0].tool_name == "mcp__alt_srv__search_titles"  # type: ignore[union-attr]
+
+
+class TestServerToolNameTracking:
+    """ServerToolUseBlock.name must round-trip to the matching
+    ServerToolResultBlock so the trajectory shows the real name
+    (web_search, bash, ...) rather than the generic 'server_tool'
+    (gemini-code-assist review on PR #3)."""
+
+    def test_server_tool_use_name_round_trips_to_result(self) -> None:
+        rec = _record()
+        translator = SdkMessageTranslator()
+        translator.translate(
+            _assistant(
+                sdk.ServerToolUseBlock(
+                    id="srv1", name="web_search", input={"query": "thrillers 2024"}
+                )
+            ),
+            rec,
+        )
+        translator.translate(
+            _assistant(
+                sdk.ServerToolResultBlock(
+                    tool_use_id="srv1",
+                    content={"results": ["..."]},
+                )
+            ),
+            rec,
+        )
+        traj = rec.finish()
+        # The server-side use is tagged with agent_id="server" and the
+        # real tool name (not "server_tool") flows through to the result.
+        uses = [e for e in traj.events if isinstance(e, ToolUse)]
+        results = [e for e in traj.events if isinstance(e, ToolResult)]
+        assert uses[0].tool_name == "web_search"
+        assert uses[0].agent_id == "server"
+        assert results[0].tool_name == "web_search"
+        assert results[0].agent_id == "server"
+
+    def test_orphan_server_result_falls_back_to_generic_label(self) -> None:
+        # When we never saw the matching ServerToolUseBlock (rare but
+        # possible mid-stream), the result still records cleanly under
+        # the generic label rather than crashing.
+        rec = _record()
+        SdkMessageTranslator().translate(
+            _assistant(sdk.ServerToolResultBlock(tool_use_id="orphan-srv", content={"k": "v"})),
+            rec,
+        )
+        results = [e for e in rec.finish().events if isinstance(e, ToolResult)]
+        assert results[0].tool_name == "server_tool"

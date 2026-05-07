@@ -15,17 +15,19 @@ vcrpy cassette with a real key, swap the fake out for the real
 ``claude_agent_sdk.query`` and the cassette will replay deterministically.
 """
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
 import claude_agent_sdk as sdk
 import pytest
 
-from harness_weaver.agent_runner import RealAgentRunner
+from harness_weaver.agent_runner import HarnessRunError, RealAgentRunner
 from harness_weaver.catalog import Catalog
 from harness_weaver.configurations import SINGLE_AGENT_BASIC
 from harness_weaver.harness import Harness
 from harness_weaver.task import Task
+from harness_weaver.tools import ToolRegistry
 from harness_weaver.trajectory import (
     AssistantTurn,
     FinalAnswer,
@@ -197,3 +199,124 @@ class TestRealAgentRunnerEndToEnd:
         turns = [e for e in trajectory.events if isinstance(e, AssistantTurn)]
         assert [t.text for t in turns] == ["thinking", "more thinking"]
         assert isinstance(trajectory.events[-1], FinalAnswer)
+
+
+class TestRunArunSplit:
+    """``run`` is sync; ``arun`` is the async fundamental. Calling ``run``
+    from inside a running loop should raise a clear error pointing at
+    ``arun`` (gemini-code-assist review on PR #3)."""
+
+    def test_run_in_sync_context_works(self, catalog: Catalog, discovery_task: Task) -> None:
+        fake = _make_query_fn([_result_msg("done")])
+        runner = RealAgentRunner(query_fn=fake)
+        registry = ToolRegistry()
+        traj = runner.run(
+            prompt="ping",
+            configuration=SINGLE_AGENT_BASIC,
+            registry=registry,
+            task_id="t1",
+        )
+        assert traj.task_id == "t1"
+        assert traj.final_answer == "done"
+
+    def test_run_from_running_loop_raises_with_actionable_message(
+        self, catalog: Catalog, discovery_task: Task
+    ) -> None:
+        fake = _make_query_fn([_result_msg("done")])
+        runner = RealAgentRunner(query_fn=fake)
+        registry = ToolRegistry()
+
+        async def call_run_from_inside_loop() -> None:
+            runner.run(
+                prompt="ping",
+                configuration=SINGLE_AGENT_BASIC,
+                registry=registry,
+                task_id="t1",
+            )
+
+        with pytest.raises(RuntimeError, match="arun"):
+            asyncio.run(call_run_from_inside_loop())
+
+    def test_arun_works_in_async_context(self, catalog: Catalog, discovery_task: Task) -> None:
+        fake = _make_query_fn([_result_msg("done from arun")])
+        runner = RealAgentRunner(query_fn=fake)
+        registry = ToolRegistry()
+
+        async def use_arun() -> None:
+            traj = await runner.arun(
+                prompt="ping",
+                configuration=SINGLE_AGENT_BASIC,
+                registry=registry,
+                task_id="t1",
+            )
+            assert traj.final_answer == "done from arun"
+
+        asyncio.run(use_arun())
+
+
+class TestPartialTrajectoryOnError:
+    """When the SDK raises mid-flight, the partial Trajectory must survive
+    so callers can debug what the agent did before the failure
+    (gemini-code-assist review on PR #3)."""
+
+    def test_exception_in_query_raises_HarnessRunError_with_partial(
+        self, catalog: Catalog, discovery_task: Task
+    ) -> None:
+        async def buggy_query(
+            *, prompt: str, options: sdk.ClaudeAgentOptions
+        ) -> AsyncIterator[Any]:
+            del prompt, options
+            yield _assistant_msg(sdk.TextBlock(text="step one"))
+            yield _assistant_msg(sdk.ToolUseBlock(id="t1", name="search_titles", input={}))
+            raise RuntimeError("simulated mid-run failure")
+
+        runner = RealAgentRunner(query_fn=buggy_query)
+        harness = Harness(catalog=catalog, runner=runner)
+        with pytest.raises(HarnessRunError) as excinfo:
+            harness.run(discovery_task, SINGLE_AGENT_BASIC)
+
+        err = excinfo.value
+        # The original exception is chained for traceback inspection.
+        assert isinstance(err.__cause__, RuntimeError)
+        assert "simulated mid-run failure" in str(err.__cause__)
+        # The partial trajectory recorded everything before the failure ...
+        assert err.partial_trajectory.task_id == "discovery-mood-tense"
+        assert any(
+            isinstance(e, AssistantTurn) and "step one" in e.text
+            for e in err.partial_trajectory.events
+        )
+        assert err.partial_trajectory.tool_call_count == 1
+        # ... plus a synthetic final assistant_turn marking the failure.
+        last_event = err.partial_trajectory.events[-1]
+        assert isinstance(last_event, AssistantTurn)
+        assert "<run aborted" in last_event.text
+        assert "simulated mid-run failure" in last_event.text
+
+
+class TestCustomServerName:
+    """``server_name`` flows from the runner through compile_options and
+    the translator, so a non-default name is consistent end-to-end
+    (gemini-code-assist review on PR #3)."""
+
+    def test_custom_server_name_threaded_through(
+        self, catalog: Catalog, discovery_task: Task
+    ) -> None:
+        captured: dict[str, Any] = {}
+
+        async def query_capturing_options(
+            *, prompt: str, options: sdk.ClaudeAgentOptions
+        ) -> AsyncIterator[Any]:
+            captured["options"] = options
+            yield _result_msg("done")
+
+        runner = RealAgentRunner(query_fn=query_capturing_options, server_name="alt_srv")
+        harness = Harness(catalog=catalog, runner=runner)
+        harness.run(discovery_task, SINGLE_AGENT_BASIC)
+
+        opts: sdk.ClaudeAgentOptions = captured["options"]
+        # MCP server registered under the custom name (not the default).
+        assert isinstance(opts.mcp_servers, dict)
+        assert "alt_srv" in opts.mcp_servers
+        assert "harness_weaver" not in opts.mcp_servers
+        # Allow-list uses the custom-prefixed names.
+        assert any(t.startswith("mcp__alt_srv__") for t in opts.allowed_tools)

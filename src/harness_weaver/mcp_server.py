@@ -22,6 +22,7 @@ module is the seam to swap — produce an ``McpStdioServerConfig`` instead.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -92,8 +93,16 @@ def _wrap_tool(tool: Tool[Any, Any]) -> sdk.SdkMcpTool[Any]:
 
     @sdk.tool(name, description, schema)
     async def wrapper(args: dict[str, Any]) -> dict[str, Any]:
+        # ``Tool.call`` is sync. The most expensive call we ship —
+        # ``run_python`` via ``LocalSubprocessBackend`` — blocks for up to
+        # ``timeout_seconds``. Running it on the event loop would freeze
+        # everything else (network reads from the SDK, hook events) for the
+        # full duration. Offload to a worker thread so the loop stays
+        # responsive. ``asyncio.to_thread`` is a no-op cost for the cheap
+        # tools (catalog reads complete in microseconds), so always-thread
+        # is the right default.
         try:
-            result = tool.call(args)
+            result = await asyncio.to_thread(tool.call, args)
         except ToolError as exc:
             return {
                 "content": [{"type": "text", "text": str(exc)}],

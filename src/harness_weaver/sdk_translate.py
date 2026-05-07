@@ -49,21 +49,6 @@ from harness_weaver.sdk_compile import DELEGATION_TOOL_NAME
 if TYPE_CHECKING:
     from harness_weaver.trajectory import TrajectoryRecorder
 
-_MCP_PREFIX = f"mcp__{DEFAULT_SERVER_NAME}__"
-
-
-def _unqualify(tool_name: str) -> str:
-    """Strip the ``mcp__<server>__`` prefix the SDK adds to MCP tool names.
-
-    The trajectory should expose the names callers wrote in
-    ``Configuration.allowed_tools`` (``search_titles``, etc.), not the
-    SDK-internal namespaced form. Names that don't match the prefix
-    (built-in tools, server-side tools) pass through unchanged.
-    """
-    if tool_name.startswith(_MCP_PREFIX):
-        return tool_name[len(_MCP_PREFIX) :]
-    return tool_name
-
 
 class SdkMessageTranslator:
     """Stateful translator: tracks parent_tool_use_id → role_name attribution.
@@ -76,11 +61,23 @@ class SdkMessageTranslator:
     messages to the right worker.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, server_name: str = DEFAULT_SERVER_NAME) -> None:
+        # The SDK exposes our MCP tools under ``mcp__<server>__<tool>``;
+        # we strip that prefix so the trajectory shows ``search_titles``
+        # rather than ``mcp__harness_weaver__search_titles``. Built using
+        # the runner's configured server name so a custom server name
+        # (matched in ``compile_options``) still strips correctly.
+        self._mcp_prefix = f"mcp__{server_name}__"
         self._role_by_tool_use_id: dict[str, str] = {}
         # ToolResultBlock only carries ``tool_use_id``; we remember the name
         # from the matching ToolUseBlock so the trajectory shows it.
         self._name_by_tool_use_id: dict[str, str] = {}
+
+    def _unqualify(self, tool_name: str) -> str:
+        """Strip our MCP prefix; built-in / server-side names pass through."""
+        if tool_name.startswith(self._mcp_prefix):
+            return tool_name[len(self._mcp_prefix) :]
+        return tool_name
 
     def translate(
         self,
@@ -113,10 +110,15 @@ class SdkMessageTranslator:
             elif isinstance(block, sdk.ToolResultBlock):
                 self._record_tool_result(block, recorder, agent_id)
             elif isinstance(block, sdk.ServerToolUseBlock):
-                recorder.tool_use(block.name, block.input, agent_id="server")
+                # Track the name so the matching ServerToolResultBlock can
+                # resolve back to it (web_search / bash / etc.) rather than
+                # falling back to a generic "server_tool" label.
+                self._name_by_tool_use_id[block.id] = block.name
+                recorder.tool_use(block.name, dict(block.input), agent_id="server")
             elif isinstance(block, sdk.ServerToolResultBlock):
+                tool_name = self._name_by_tool_use_id.get(block.tool_use_id, "server_tool")
                 recorder.tool_result(
-                    "server_tool",
+                    tool_name,
                     result=_server_result_payload(block),
                     duration_seconds=0.0,
                     agent_id="server",
@@ -135,7 +137,7 @@ class SdkMessageTranslator:
             subagent_type = block.input.get("subagent_type")
             if isinstance(subagent_type, str):
                 self._role_by_tool_use_id[block.id] = subagent_type
-        clean_name = _unqualify(block.name)
+        clean_name = self._unqualify(block.name)
         self._name_by_tool_use_id[block.id] = clean_name
         recorder.tool_use(clean_name, dict(block.input), agent_id=agent_id)
 
