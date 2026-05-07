@@ -28,6 +28,10 @@ dependencies = [
     "k8s-agent-sandbox>=0.4,<0.5",
     # Eval pipeline. 0.3.x is stable; bump floor to a recent patch.
     "inspect-ai>=0.3.200,<0.4",
+    # inspect-ai's Anthropic provider needs the anthropic SDK at runtime;
+    # listing it explicitly keeps `pip install harness-weaver` self-sufficient
+    # for the LLM judge path. (inspect-ai treats it as an optional extra.)
+    "anthropic>=0.50",
     # Validation and CLI
     "pydantic>=2.7",
     "typer>=0.12",

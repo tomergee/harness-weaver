@@ -135,24 +135,72 @@ def compare(
         str | None,
         typer.Option("--model", help="Override the model for both configurations."),
     ] = None,
+    judge_model: Annotated[
+        str | None,
+        typer.Option(
+            "--judge-model",
+            help=(
+                "Run the LLM-as-judge with this Inspect-AI model id "
+                "(e.g. 'anthropic/claude-haiku-4-5-20251001'). When set, "
+                "writes a JSON verdict alongside the markdown report. "
+                "Without this flag, only the rules-based structural "
+                "report is produced — no API call."
+            ),
+        ),
+    ] = None,
     output_dir: Annotated[
         Path, typer.Option("--output-dir", help="Directory for comparison output.")
     ] = Path("runs"),
 ) -> None:
     """Run the same task under two configurations and emit a side-by-side report.
 
-    The judge step (LLM-as-judge over the two trajectories) lands separately.
-    For now this command writes both trajectories to disk so the judge can
-    consume them later without re-running the agent.
+    Two layers:
+
+    * The structural report (rules-based, free) is always produced. It
+      counts events, classifies failure modes, and pass/fails any
+      ``Task.success_criteria``.
+    * The LLM judge (paid, opt-in via ``--judge-model``) emits a
+      JSON verdict that includes a winner, reasoning, and confidence.
     """
+    import asyncio
+
+    from harness_weaver.judge import StructuralReport, render_markdown
+    from harness_weaver.judge.llm import InspectAILlmJudge
+
     cfg_a = _resolve_config(config_a, model)
     cfg_b = _resolve_config(config_b, model)
     task_obj = Task.from_path(task)
     harness = _build_harness()
+    trajectories = []
     for cfg in (cfg_a, cfg_b):
         trajectory = harness.run(task_obj, cfg)
         out_path = output_dir / f"{trajectory.task_id}.{cfg.name}.json"
         _write_trajectory(trajectory.model_dump_json(indent=2), out_path)
+        trajectories.append(trajectory)
+
+    # Structural report: always run, no API.
+    report = StructuralReport.of(trajectories[0], trajectories[1], task=task_obj)
+    report_path = output_dir / f"{task_obj.task_id}.compare.md"
+    report_path.write_text(render_markdown(report), encoding="utf-8")
+    console.print(f"structural report written to [bold]{report_path}[/bold]")
+
+    # LLM verdict: opt-in.
+    if judge_model is not None:
+        judge = InspectAILlmJudge(model=judge_model)
+        verdict = asyncio.run(
+            judge.verdict(
+                task=task_obj,
+                trajectory_a=trajectories[0],
+                trajectory_b=trajectories[1],
+            )
+        )
+        verdict_path = output_dir / f"{task_obj.task_id}.compare.verdict.json"
+        verdict_path.write_text(verdict.model_dump_json(indent=2), encoding="utf-8")
+        console.print(f"judge verdict written to [bold]{verdict_path}[/bold]")
+        console.print(
+            f"[bold]winner:[/bold] {verdict.winner}  "
+            f"[dim](confidence {verdict.confidence:.2f})[/dim]"
+        )
 
 
 @app.command(name="eval")

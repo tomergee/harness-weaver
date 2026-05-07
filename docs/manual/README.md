@@ -14,7 +14,9 @@ jump around if you already know the basics.
    list-configs`. Flags, output paths, exit behavior.
 4. **[Extending the harness](extending.md)** — write a new Task, define a
    Configuration, add a Tool, swap the ExecutionBackend.
-5. **[Troubleshooting](troubleshooting.md)** — known gotchas, especially
+5. **[Judging trajectories](judge.md)** — structural report, failure-mode
+   classifier, LLM-as-judge with `inspect-ai`.
+6. **[Troubleshooting](troubleshooting.md)** — known gotchas, especially
    around live SDK runs.
 
 ## Two-minute orientation
