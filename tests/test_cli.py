@@ -47,18 +47,6 @@ def test_list_configs_prints_built_ins() -> None:
         assert name in result.stdout
 
 
-def test_run_against_real_runner_fails_with_actionable_error(
-    tmp_path: Path, sample_task: dict[str, object]
-) -> None:
-    task_path = tmp_path / "task.json"
-    task_path.write_text(json.dumps(sample_task))
-    result = runner.invoke(app, ["run", str(task_path), "--config", "single-agent-basic"])
-    assert result.exit_code != 0
-    # The exception bubbles up; verify it's the right one.
-    assert isinstance(result.exception, NotImplementedError)
-    assert "SDK-wiring PR" in str(result.exception)
-
-
 def test_run_unknown_config_fails_cleanly(tmp_path: Path, sample_task: dict[str, object]) -> None:
     task_path = tmp_path / "task.json"
     task_path.write_text(json.dumps(sample_task))

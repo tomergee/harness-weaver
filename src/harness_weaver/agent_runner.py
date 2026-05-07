@@ -3,8 +3,9 @@
 A runner takes a prompt, a configuration, and a tool registry, and produces
 a :class:`Trajectory`. Two implementations:
 
-* :class:`RealAgentRunner` — wraps ``claude-agent-sdk`` and an MCP server
-  exposing the registry. Not yet implemented (lands with the SDK-wiring PR).
+* :class:`RealAgentRunner` — wraps ``claude-agent-sdk.query`` and an
+  in-process MCP server exposing the registry. Live model in the loop;
+  needs ``ANTHROPIC_API_KEY``.
 * :class:`FakeAgentRunner` — replays a scripted sequence of decisions but
   invokes the *real* tool registry, so tests exercise the registry/tool
   integration without an API key.
@@ -15,14 +16,24 @@ for a tool it isn't allowed to call gets a structured error rather than
 silent execution.
 """
 
+import asyncio
 import time
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import claude_agent_sdk as sdk
+
 from harness_weaver.configurations import ORCHESTRATOR_AGENT_ID, Configuration
+from harness_weaver.mcp_server import build_sdk_server
+from harness_weaver.sdk_compile import compile_options
+from harness_weaver.sdk_translate import SdkMessageTranslator
 from harness_weaver.tools import ToolError, ToolRegistry
 from harness_weaver.trajectory import Trajectory, TrajectoryRecorder
+
+QueryFn = Callable[..., AsyncIterator[Any]]
+"""Signature of ``claude_agent_sdk.query`` — kept open so tests can inject a fake."""
 
 
 class AgentRunner(ABC):
@@ -44,13 +55,29 @@ class AgentRunner(ABC):
 
 
 class RealAgentRunner(AgentRunner):
-    """Production runner. Not implemented yet.
+    """Production runner: drives ``claude_agent_sdk.query`` against an
+    in-process MCP server wrapping our tool registry.
 
-    The architecture is in place for this to wrap ``claude-agent-sdk.query``
-    and a stdio MCP server that exposes the tool registry. Wiring is
-    intentionally deferred to a follow-up PR so the design choices made
-    here can be reviewed independently of the SDK integration details.
+    Args:
+        query_fn: Override the SDK's ``query`` function — used by tests
+            to inject a scripted async iterator of SDK messages without
+            hitting the API. Defaults to ``claude_agent_sdk.query``.
+
+    The flow:
+        1. Build an SDK MCP server from the registry.
+        2. Compile the Configuration to ``ClaudeAgentOptions`` referencing
+           that server.
+        3. Run ``query()`` inside an asyncio loop, streaming messages.
+        4. Translate each message to Trajectory events via
+           :class:`SdkMessageTranslator`.
+
+    Recording a vcrpy cassette of one live run lets CI replay the same
+    trajectory deterministically; see ``tests/test_real_agent_runner.py``
+    for the cassette hook.
     """
+
+    def __init__(self, *, query_fn: QueryFn | None = None) -> None:
+        self._query_fn: QueryFn = query_fn or sdk.query
 
     def run(
         self,
@@ -60,12 +87,22 @@ class RealAgentRunner(AgentRunner):
         registry: ToolRegistry,
         task_id: str,
     ) -> Trajectory:
-        del prompt, configuration, registry, task_id  # consumed by the future implementation
-        raise NotImplementedError(
-            "RealAgentRunner is not implemented yet. Use FakeAgentRunner with a script "
-            "for tests, or wait for the SDK-wiring PR. Tracked as the next deliverable "
-            "after the Tier 1 architecture lands."
+        recorder = TrajectoryRecorder(
+            task_id=task_id,
+            configuration_name=configuration.name,
         )
+        recorder.user_message(prompt)
+
+        mcp_server = build_sdk_server(registry)
+        options = compile_options(configuration, mcp_server=mcp_server)
+        translator = SdkMessageTranslator()
+
+        async def drive() -> None:
+            async for message in self._query_fn(prompt=prompt, options=options):
+                translator.translate(message, recorder)
+
+        asyncio.run(drive())
+        return recorder.finish()
 
 
 # --- Fake runner for tests -----------------------------------------------
