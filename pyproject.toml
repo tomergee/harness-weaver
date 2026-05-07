@@ -21,13 +21,13 @@ classifiers = [
 ]
 
 dependencies = [
-    # Agent runtime
-    "claude-agent-sdk>=0.1.0",
-    "mcp>=1.0.0",
-    # Sandboxed execution
-    "k8s-agent-sandbox>=0.1.0",
-    # Eval pipeline
-    "inspect-ai>=0.3.0",
+    # Agent runtime. claude-agent-sdk is 0.x; cap to next minor.
+    "claude-agent-sdk>=0.1.70,<0.2",
+    "mcp>=1.20,<2",
+    # Sandboxed execution. 0.x with active API churn; cap to next minor.
+    "k8s-agent-sandbox>=0.4,<0.5",
+    # Eval pipeline. 0.3.x is stable; bump floor to a recent patch.
+    "inspect-ai>=0.3.200,<0.4",
     # Validation and CLI
     "pydantic>=2.7",
     "typer>=0.12",
