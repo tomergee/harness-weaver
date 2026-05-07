@@ -11,8 +11,8 @@ Configuration: **single-agent-basic**
 | Total tool calls       | 5 |
 | Mean tool calls / task | 2.5 |
 | Median tool calls      | 2.5 |
-| Total duration (s)     | 33.30 |
-| Total cost (USD)       | $0.0274 |
+| Total duration (s)     | 33.03 |
+| Total cost (USD)       | $0.026872 |
 
 ## Success criteria
 
@@ -29,5 +29,5 @@ Configuration: **single-agent-basic**
 
 | Task | Completed | Modes | Tool calls | Duration (s) | Cost (USD) |
 | --- | --- | --- | --- | --- | --- |
-| `discovery-mood-tense` | yes | none | 4 | 26.93 | $0.0195 |
-| `analytical-runtime-rating` | yes | none | 1 | 6.37 | $0.0080 |
+| `discovery-mood-tense` | yes | none | 4 | 26.68 | $0.018768 |
+| `analytical-runtime-rating` | yes | none | 1 | 6.35 | $0.008104 |

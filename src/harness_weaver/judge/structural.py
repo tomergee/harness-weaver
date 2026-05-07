@@ -144,10 +144,15 @@ def _yn(value: bool) -> str:
 
 
 def _money(value: float | None) -> str:
-    """Render a USD cost as ``$0.0123`` or ``-`` when not tracked."""
+    """Render a USD cost or ``-`` when not tracked.
+
+    Six decimal places — see the matching ``_money`` in
+    :mod:`.aggregate` for the precision rationale. Kept in sync with
+    that copy; refactor into a shared helper if a third callsite shows up.
+    """
     if value is None:
         return "-"
-    return f"${value:.4f}"
+    return f"${value:.6f}"
 
 
 def _or_dash(value: int | None) -> str:

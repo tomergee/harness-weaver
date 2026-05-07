@@ -234,6 +234,72 @@ class TestMarkdownRender:
         assert "Total cost (USD)       | -" in md
 
 
+class TestCostPrecision:
+    """Regression for gemini-code-assist review on PR #5: 4-decimal
+    precision rendered very cheap calls as ``$0.0000``. Six decimals
+    covers everything realistic without sacrificing readability."""
+
+    def test_sub_4dp_cost_is_visible(self, two_task_pack: TaskPack) -> None:
+        # $0.000023 — a sub-cent cost that would have rendered as
+        # $0.0000 under the old 4-decimal format.
+        a = _trajectory(task_id="t1", total_cost_usd=0.000023)
+        b = _trajectory(task_id="t2")
+        md = render_pack_markdown(
+            PackSummary.of([a, b], pack=two_task_pack, configuration_name="cfg-a")
+        )
+        assert "$0.000023" in md
+        assert "$0.0000 " not in md  # never the misleading rounded-to-zero
+
+    def test_per_task_cost_uses_six_decimals(self, two_task_pack: TaskPack) -> None:
+        a = _trajectory(task_id="t1", total_cost_usd=0.0000571)
+        b = _trajectory(task_id="t2")
+        md = render_pack_markdown(
+            PackSummary.of([a, b], pack=two_task_pack, configuration_name="cfg-a")
+        )
+        assert "$0.000057" in md  # 6dp, rounded
+
+
+class TestPartialCostCoverageNote:
+    """Regression for gemini-code-assist review on PR #5: a partial
+    cost sum without context is misleading. The renderer must call out
+    ``(N of M tasks tracked)`` so readers don't read the partial total
+    as the full one."""
+
+    def test_partial_coverage_includes_tracked_note(self, two_task_pack: TaskPack) -> None:
+        a = _trajectory(task_id="t1", total_cost_usd=0.05)
+        b = _trajectory(task_id="t2", total_cost_usd=None)
+        md = render_pack_markdown(
+            PackSummary.of([a, b], pack=two_task_pack, configuration_name="cfg-a")
+        )
+        assert "1 of 2 tasks tracked" in md
+
+    def test_full_coverage_omits_tracked_note(self, two_task_pack: TaskPack) -> None:
+        a = _trajectory(task_id="t1", total_cost_usd=0.05)
+        b = _trajectory(task_id="t2", total_cost_usd=0.10)
+        md = render_pack_markdown(
+            PackSummary.of([a, b], pack=two_task_pack, configuration_name="cfg-a")
+        )
+        # When every task contributed cost, no qualifier needed.
+        assert "tasks tracked" not in md
+
+    def test_zero_coverage_renders_dash_without_note(self, two_task_pack: TaskPack) -> None:
+        a = _trajectory(task_id="t1", total_cost_usd=None)
+        b = _trajectory(task_id="t2", total_cost_usd=None)
+        md = render_pack_markdown(
+            PackSummary.of([a, b], pack=two_task_pack, configuration_name="cfg-a")
+        )
+        # Nothing tracked → just '-', no '(0 of 2 tracked)' noise on top.
+        assert "Total cost (USD)       | -" in md
+        assert "tasks tracked" not in md
+
+    def test_cost_tracked_count_field_set(self, two_task_pack: TaskPack) -> None:
+        a = _trajectory(task_id="t1", total_cost_usd=0.05)
+        b = _trajectory(task_id="t2", total_cost_usd=None)
+        summary = PackSummary.of([a, b], pack=two_task_pack, configuration_name="cfg-a")
+        assert summary.cost_tracked_count == 1
+        assert summary.task_count == 2
+
+
 class TestPerTaskSummaryShape:
     def test_carries_failure_modes_and_cost(self) -> None:
         s = PerTaskSummary(

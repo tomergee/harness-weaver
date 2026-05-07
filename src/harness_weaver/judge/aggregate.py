@@ -64,6 +64,13 @@ class PackSummary:
     median_tool_calls: float = 0.0
     total_duration_seconds: float = 0.0
     total_cost_usd: float | None = None
+    # Number of trajectories whose ``total_cost_usd`` was non-None and
+    # contributed to ``total_cost_usd``. Differs from ``task_count`` when
+    # the SDK didn't surface cost on every run (mixed live + fake data,
+    # older SDK versions). The markdown renderer uses this to flag a
+    # partial sum as "($X of Y tracked)" so readers don't misread a
+    # partial total as the full number.
+    cost_tracked_count: int = 0
 
     @classmethod
     def of(
@@ -113,6 +120,7 @@ class PackSummary:
             median_tool_calls=statistics.median(tool_calls) if tool_calls else 0.0,
             total_duration_seconds=sum(durations),
             total_cost_usd=sum(costs) if costs else None,
+            cost_tracked_count=len(costs),
         )
 
     @property
@@ -150,7 +158,7 @@ def render_pack_markdown(summary: PackSummary) -> str:
         f"| Mean tool calls / task | {summary.mean_tool_calls:.1f} |",
         f"| Median tool calls      | {summary.median_tool_calls:.1f} |",
         f"| Total duration (s)     | {summary.total_duration_seconds:.2f} |",
-        f"| Total cost (USD)       | {_money(summary.total_cost_usd)} |",
+        f"| Total cost (USD)       | {_format_total_cost(summary)} |",
         "",
     ]
 
@@ -240,9 +248,34 @@ def _yn(value: bool) -> str:
 
 
 def _money(value: float | None) -> str:
+    """Render a USD cost or ``-`` when not tracked.
+
+    Six decimal places: typical Haiku-shaped runs cost $0.005-$0.05
+    and look fine at any precision; very cheap calls (single-shot
+    cached completions, sub-token-count probes) can land below
+    $0.0001 and would render as misleading ``$0.0000`` at 4dp.
+    Six places covers every realistic case while staying readable.
+    """
     if value is None:
         return "-"
-    return f"${value:.4f}"
+    return f"${value:.6f}"
+
+
+def _format_total_cost(summary: PackSummary) -> str:
+    """Render the aggregate cost cell, flagging partial coverage.
+
+    A pack-level total summed from a strict subset of tasks would read
+    as the same column as a full total — that's what gemini-code-assist
+    review on PR #5 flagged. We show ``($X of Y tracked)`` whenever the
+    coverage is partial so readers don't mistake an incomplete sum for
+    the whole pack's spend.
+    """
+    rendered = _money(summary.total_cost_usd)
+    if summary.total_cost_usd is None:
+        return rendered
+    if summary.cost_tracked_count < summary.task_count:
+        return f"{rendered} ({summary.cost_tracked_count} of {summary.task_count} tasks tracked)"
+    return rendered
 
 
 __all__ = [
