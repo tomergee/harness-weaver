@@ -86,6 +86,19 @@ event kinds, discriminated by `type`:
 Every event has an `agent_id` so multi-agent runs are attributable
 (`"orchestrator"`, `"discovery"`, `"explainer"`, ...).
 
+The Trajectory itself carries two run-level fields beyond the event
+list, populated when the SDK reports them on its terminal
+`ResultMessage`:
+
+* `total_cost_usd: float | None` — provider cost in USD. `None` for
+  trajectories from `FakeAgentRunner` (no model call) and for older
+  SDK paths that don't surface cost.
+* `num_turns: int | None` — number of model turns the SDK counted.
+
+The judge layer's pack rollup sums `total_cost_usd` across runs (and
+flags partial coverage when only some trajectories tracked cost — see
+`judge.md`).
+
 Trajectories round-trip through JSON; pydantic v2 handles the
 discriminated union. Inspecting one is just `json.load` + iterate.
 

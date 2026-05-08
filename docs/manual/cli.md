@@ -57,7 +57,9 @@ harness-weaver run examples/tasks/discovery-mood-tense.json \
 
 ## `harness-weaver compare`
 
-Run the same Task under two Configurations; write both trajectories.
+Run the same Task under two Configurations; write both trajectories
+plus a side-by-side structural report. Optionally invoke the LLM
+judge for a paid quality verdict.
 
 ```bash
 harness-weaver compare TASK --config-a A --config-b B [OPTIONS]
@@ -69,27 +71,43 @@ harness-weaver compare TASK --config-a A --config-b B [OPTIONS]
 | `--config-a` | yes | First configuration name. |
 | `--config-b` | yes | Second configuration name. |
 | `--model` | no | Override the model for **both** runs (so the only thing varying between them is the configuration). |
+| `--judge-model` | no | Run the LLM-as-judge with this Inspect-AI model id (e.g. `anthropic/claude-haiku-4-5-20251001`). When set, writes a JSON verdict alongside the markdown report. Without this flag, only the rules-based structural report is produced — no API call. |
 | `--output-dir` | no | Default `runs/`. |
 
-The judge step (LLM-as-judge over the two trajectories) is not yet
-implemented. For now this command writes both trajectories so a future
-judge can consume them without re-running the agent. See the project
-README's "What's missing on purpose" for the rationale.
+**Two layers of judgment**, both rooted in the same trajectories:
 
-### Example
+* **Structural report** — rules-based, deterministic, free. Always
+  produced. Counts events, classifies failure modes, pass/fails any
+  `Task.success_criteria`. Lands as `{task_id}.compare.md`.
+* **LLM-as-judge verdict** — opt-in via `--judge-model`. Sends both
+  trajectories plus the structural report to Claude (via inspect-ai)
+  and emits a JSON verdict (winner, reasoning, confidence). Lands as
+  `{task_id}.compare.verdict.json`. Costs money.
+
+See [Judging trajectories](judge.md) for the rubric and prompt.
+
+Output filenames:
+
+* `{task_id}.{config_a_name}.json` — trajectory A
+* `{task_id}.{config_b_name}.json` — trajectory B
+* `{task_id}.compare.md` — structural report (always)
+* `{task_id}.compare.verdict.json` — LLM verdict (when `--judge-model` set)
+
+### Examples
 
 ```bash
+# Structural report only — free, no API call:
 harness-weaver compare examples/tasks/analytical-runtime-rating.json \
     --config-a single-agent-basic \
     --config-b single-agent-with-sandbox \
     --model claude-haiku-4-5-20251001
-```
 
-Inspect both outputs in `runs/`:
-
-```text
-runs/analytical-runtime-rating.single-agent-basic.json
-runs/analytical-runtime-rating.single-agent-with-sandbox.json
+# Plus LLM-as-judge verdict (~$0.005 per verdict on Haiku):
+harness-weaver compare examples/tasks/analytical-runtime-rating.json \
+    --config-a single-agent-basic \
+    --config-b single-agent-with-sandbox \
+    --model claude-haiku-4-5-20251001 \
+    --judge-model anthropic/claude-haiku-4-5-20251001
 ```
 
 ## `harness-weaver eval`
