@@ -18,6 +18,7 @@ For programmatic use without the SDK in the loop, instantiate
 path the e2e tests exercise.
 """
 
+import tomllib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -46,10 +47,12 @@ def _discover_repo_root() -> Path | None:
         if not marker.is_file():
             continue
         try:
-            text = marker.read_text(encoding="utf-8")
-        except OSError:
+            with marker.open("rb") as f:
+                data = tomllib.load(f)
+        except (OSError, tomllib.TOMLDecodeError):
             continue
-        if 'name = "harness-weaver"' in text or "name = 'harness-weaver'" in text:
+        project = data.get("project")
+        if isinstance(project, dict) and project.get("name") == "harness-weaver":
             return d
     return None
 
@@ -71,8 +74,6 @@ def _load_dotenv_files() -> None:
             load_dotenv(path, override=False)
             return
 
-
-_load_dotenv_files()
 
 app = typer.Typer(
     name="harness-weaver",
@@ -105,6 +106,7 @@ def main(
 ) -> None:
     """harness-weaver entry point."""
     del version  # consumed by the eager callback above
+    _load_dotenv_files()
 
 
 @app.command(name="list-configs")
