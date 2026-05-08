@@ -1,4 +1,3 @@
-<img width="1065" height="1158" alt="weaver_demo_trajectory1" src="https://github.com/user-attachments/assets/0250ad37-496d-4d24-a1b2-c44604a3a48f" />
 # harness-weaver
 
 A small experimentation harness for agentic systems on recommendation-style
@@ -201,6 +200,7 @@ as untrusted). See
 and the programmatic-use entry point.
 
 ---
+<img width="1065" height="1158" alt="weaver_demo_trajectory1" src="https://github.com/user-attachments/assets/0250ad37-496d-4d24-a1b2-c44604a3a48f" />
 
 ## Architecture
 
