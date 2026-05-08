@@ -169,6 +169,36 @@ tears it back down. See
 [`docs/manual/k8s-sandbox.md`](docs/manual/k8s-sandbox.md) for the
 full walk-through, troubleshooting, and programmatic use.
 
+### Running with the web UI
+
+For a click-around interface, install the `web` extra and start the
+optional FastAPI server:
+
+```bash
+pip install -e ".[web]"          # fastapi, uvicorn, jinja2, markdown, bleach
+harness-weaver serve --host 127.0.0.1 --port 8000
+```
+
+Then open <http://127.0.0.1:8000>. The pages:
+
+| Path                          | What |
+|-------------------------------|---|
+| `/`                           | Lists trajectories (`*.json`) and reports (`*.md`) under `runs/`. |
+| `/runs/new`                   | Form to kick off a single run (task, configuration, model override, K8s sandbox toggle). |
+| `/compare/new`                | Same task, two configurations; optional `judge_model` for an LLM verdict. |
+| `/eval/new`                   | One configuration over a task pack. |
+| `/trajectories/{filename}`    | Renders the trajectory JSON readably — header, final answer, event timeline. |
+| `/reports/{filename}`         | Renders compare / eval markdown reports as HTML; surfaces the judge verdict alongside when present. |
+
+Caveats up front: server-rendered Jinja2 templates, single uvicorn
+worker, sync execution. The browser blocks for the duration of every
+run (~20-90s on Haiku). No auth — bind to `127.0.0.1` and don't
+expose it on a network. Markdown is sanitized with `bleach` before
+reaching the page (LLM output and trajectory snippets are treated
+as untrusted). See
+[`docs/manual/web.md`](docs/manual/web.md) for the full walk-through
+and the programmatic-use entry point.
+
 ---
 
 ## Architecture
@@ -328,8 +358,6 @@ The judge prompt and calibration set are in `eval/`.
 
 ## What's missing on purpose
 
-- **No web UI.** This is an orchestration project, not a frontend project.
-  The CLI is the surface.
 - **No streaming model output.** Sync only in v1. The eval pipeline benefits
   from streaming; the harness itself doesn't.
 - **No telemetry beyond Trajectory.** The trajectory IS the trace. OTel
