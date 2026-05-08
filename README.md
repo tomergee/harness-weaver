@@ -346,7 +346,9 @@ The judge prompt and calibration set are in `eval/`.
 - `mypy --strict` clean
 - `ruff` for lint and format
 - `pytest` with coverage gating (≥70%)
-- E2E tests use `vcrpy` cassettes — no live API calls in CI
+- E2E tests replay a recorded SDK message stream from
+  `tests/cassettes/` — no live API calls in CI. Re-record with
+  `scripts/record-cassette.py` (needs `ANTHROPIC_API_KEY`).
 - Pre-commit hooks for formatting and basic checks
 - GitHub Actions CI on PRs and pushes to main
 
