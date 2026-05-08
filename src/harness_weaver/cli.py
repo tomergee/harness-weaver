@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 import typer
+from dotenv import load_dotenv
 from rich.console import Console
 
 from harness_weaver import __version__
@@ -35,6 +36,43 @@ from harness_weaver.task import Task, TaskPack
 
 if TYPE_CHECKING:
     from harness_weaver.configurations import Configuration
+
+
+def _discover_repo_root() -> Path | None:
+    """Return the harness-weaver checkout root (contains pyproject.toml), if known."""
+    here = Path(__file__).resolve()
+    for d in (here.parent, *here.parents):
+        marker = d / "pyproject.toml"
+        if not marker.is_file():
+            continue
+        try:
+            text = marker.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if 'name = "harness-weaver"' in text or "name = 'harness-weaver'" in text:
+            return d
+    return None
+
+
+def _load_dotenv_files() -> None:
+    """Load a single .env file: prefer cwd, then repo root, then repo parent.
+
+    Stops at the first path that exists. ``override=False`` keeps keys already
+    set in the process environment (e.g. exported in the shell).
+    """
+    cwd = Path.cwd()
+    candidates: list[Path] = [cwd / ".env"]
+    root = _discover_repo_root()
+    if root is not None:
+        candidates.append(root / ".env")
+        candidates.append(root.parent / ".env")
+    for path in candidates:
+        if path.is_file():
+            load_dotenv(path, override=False)
+            return
+
+
+_load_dotenv_files()
 
 app = typer.Typer(
     name="harness-weaver",
