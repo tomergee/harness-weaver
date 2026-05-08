@@ -9,7 +9,7 @@ Backends:
     LocalSubprocessBackend  — runs Python via subprocess on the host.
                               Dev only; no real isolation.
     AgentSandboxBackend     — wraps kubernetes-sigs/agent-sandbox.
-                              (Stubbed for now; lands in a follow-up.)
+                              Production-grade isolation; needs a cluster.
 """
 
 from harness_weaver.execution.base import (
@@ -18,9 +18,11 @@ from harness_weaver.execution.base import (
     ExecutionResult,
     ExecutionTimeoutError,
 )
+from harness_weaver.execution.k8s import AgentSandboxBackend
 from harness_weaver.execution.local import LocalSubprocessBackend
 
 __all__ = [
+    "AgentSandboxBackend",
     "ExecutionBackend",
     "ExecutionRequest",
     "ExecutionResult",

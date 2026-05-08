@@ -1,4 +1,4 @@
-.PHONY: help install fmt lint typecheck test test-cov check clean
+.PHONY: help install fmt lint typecheck test test-cov check clean kind-up kind-down
 
 help:
 	@echo "Targets:"
@@ -10,6 +10,8 @@ help:
 	@echo "  test-cov    run pytest with coverage report"
 	@echo "  check       fmt + lint + typecheck + test (the gate before opening a PR)"
 	@echo "  clean       remove build artifacts and caches"
+	@echo "  kind-up     bring up a local Kind cluster + agent-sandbox controller + python template"
+	@echo "  kind-down   tear it back down"
 
 install:
 	pip install -e ".[dev]"
@@ -39,3 +41,9 @@ clean:
 	rm -rf .mypy_cache .ruff_cache .pytest_cache htmlcov coverage.xml .coverage
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type d -name "*.egg-info" -exec rm -rf {} +
+
+kind-up:
+	./scripts/kind-up.sh
+
+kind-down:
+	./scripts/kind-down.sh
