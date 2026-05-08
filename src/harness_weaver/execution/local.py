@@ -33,6 +33,15 @@ from harness_weaver.execution.base import (
 _ENV_PASSTHROUGH: tuple[str, ...] = ("PATH", "LANG", "LC_ALL", "PYTHONIOENCODING")
 
 
+def _timeout_stream_text(data: str | bytes | None) -> str:
+    """Normalize ``TimeoutExpired.stdout`` / ``stderr`` (bytes or str when ``text=True``)."""
+    if not data:
+        return ""
+    if isinstance(data, bytes):
+        return data.decode("utf-8", errors="replace")
+    return data
+
+
 class LocalSubprocessBackend(ExecutionBackend):
     """Runs Python snippets in a child ``python`` subprocess.
 
@@ -75,8 +84,8 @@ class LocalSubprocessBackend(ExecutionBackend):
             except subprocess.TimeoutExpired as e:
                 timed_out = True
                 # TimeoutExpired exposes whatever was buffered before kill.
-                stdout = e.stdout.decode("utf-8", errors="replace") if e.stdout else ""
-                stderr = e.stderr.decode("utf-8", errors="replace") if e.stderr else ""
+                stdout = _timeout_stream_text(e.stdout)
+                stderr = _timeout_stream_text(e.stderr)
                 # Conventional Unix code for SIGKILL; informational only.
                 exit_code = -9
 
