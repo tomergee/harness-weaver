@@ -103,6 +103,33 @@ def test_build_harness_context_manager_closes_k8s_backend(
     backend_instance.__exit__.assert_called_once()
 
 
+def test_build_harness_threads_k8s_namespace_to_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for PR #8 review (MED): if the user installed the
+    SandboxTemplate to a non-default namespace via ``NAMESPACE=harness
+    make install-sandbox``, the CLI ``--k8s-namespace harness`` flag must
+    flow through to ``AgentSandboxBackend(namespace=...)``. Without this
+    wiring the backend silently defaults to ``"default"`` and the run
+    fails with ``SandboxTemplate "python" not found``.
+    """
+    from unittest.mock import MagicMock
+
+    from harness_weaver.cli import _build_harness
+
+    backend_instance = MagicMock()
+    backend_instance.__enter__ = MagicMock(return_value=backend_instance)
+    backend_instance.__exit__ = MagicMock(return_value=False)
+
+    fake_class = MagicMock(return_value=backend_instance)
+    monkeypatch.setattr("harness_weaver.execution.AgentSandboxBackend", fake_class)
+
+    with _build_harness(use_k8s=True, k8s_namespace="harness"):
+        pass
+
+    fake_class.assert_called_once_with(namespace="harness")
+
+
 def test_build_harness_no_backend_when_local() -> None:
     """When ``use_k8s=False``, no K8s backend is constructed at all —
     avoids the import cost and any cluster connection attempt."""

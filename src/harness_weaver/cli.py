@@ -77,7 +77,11 @@ def list_configs() -> None:
 
 
 @contextmanager
-def _build_harness(*, use_k8s: bool = False) -> Iterator[Harness]:
+def _build_harness(
+    *,
+    use_k8s: bool = False,
+    k8s_namespace: str = "default",
+) -> Iterator[Harness]:
     """Yield a Harness with the appropriate execution backend.
 
     Context-manager rather than a plain factory because the K8s
@@ -89,7 +93,10 @@ def _build_harness(*, use_k8s: bool = False) -> Iterator[Harness]:
     ``use_k8s=True`` swaps :class:`LocalSubprocessBackend` for
     :class:`AgentSandboxBackend`, which expects a configured cluster
     plus the ``python`` SandboxTemplate installed; see
-    ``docs/manual/k8s-sandbox.md`` for setup.
+    ``docs/manual/k8s-sandbox.md`` for setup. ``k8s_namespace`` must
+    match the namespace the template was applied to (``NAMESPACE=…
+    make install-sandbox``); the backend default is ``"default"`` and
+    a mismatch surfaces as ``SandboxTemplate "python" not found``.
     """
     if not use_k8s:
         yield Harness(catalog=Catalog.load_default(), runner=RealAgentRunner())
@@ -97,7 +104,7 @@ def _build_harness(*, use_k8s: bool = False) -> Iterator[Harness]:
 
     from harness_weaver.execution import AgentSandboxBackend
 
-    with AgentSandboxBackend() as backend:
+    with AgentSandboxBackend(namespace=k8s_namespace) as backend:
         yield Harness(
             catalog=Catalog.load_default(),
             runner=RealAgentRunner(),
@@ -130,6 +137,13 @@ _K8S_FLAG_HELP = (
     "see docs/manual/k8s-sandbox.md."
 )
 
+_K8S_NAMESPACE_HELP = (
+    "Kubernetes namespace the 'python' SandboxTemplate was installed "
+    "into. Must match the NAMESPACE you passed to 'make install-sandbox' "
+    "(or to scripts/install-agent-sandbox.sh). Default 'default'. "
+    "Ignored unless --use-k8s is set."
+)
+
 
 @app.command()
 def run(
@@ -152,11 +166,14 @@ def run(
         Path, typer.Option("--output-dir", help="Directory for trajectory output.")
     ] = Path("runs"),
     use_k8s: Annotated[bool, typer.Option("--use-k8s", help=_K8S_FLAG_HELP)] = False,
+    k8s_namespace: Annotated[
+        str, typer.Option("--k8s-namespace", help=_K8S_NAMESPACE_HELP)
+    ] = "default",
 ) -> None:
     """Run a single task with one configuration; emit a trajectory."""
     cfg = _resolve_config(config, model)
     task_obj = Task.from_path(task)
-    with _build_harness(use_k8s=use_k8s) as harness:
+    with _build_harness(use_k8s=use_k8s, k8s_namespace=k8s_namespace) as harness:
         trajectory = harness.run(task_obj, cfg)
     out_path = output_dir / f"{trajectory.task_id}.{cfg.name}.json"
     _write_trajectory(trajectory.model_dump_json(indent=2), out_path)
@@ -188,6 +205,9 @@ def compare(
         Path, typer.Option("--output-dir", help="Directory for comparison output.")
     ] = Path("runs"),
     use_k8s: Annotated[bool, typer.Option("--use-k8s", help=_K8S_FLAG_HELP)] = False,
+    k8s_namespace: Annotated[
+        str, typer.Option("--k8s-namespace", help=_K8S_NAMESPACE_HELP)
+    ] = "default",
 ) -> None:
     """Run the same task under two configurations and emit a side-by-side report.
 
@@ -208,7 +228,7 @@ def compare(
     cfg_b = _resolve_config(config_b, model)
     task_obj = Task.from_path(task)
     trajectories = []
-    with _build_harness(use_k8s=use_k8s) as harness:
+    with _build_harness(use_k8s=use_k8s, k8s_namespace=k8s_namespace) as harness:
         for cfg in (cfg_a, cfg_b):
             trajectory = harness.run(task_obj, cfg)
             out_path = output_dir / f"{trajectory.task_id}.{cfg.name}.json"
@@ -254,6 +274,9 @@ def eval_(
         Path, typer.Option("--output-dir", help="Directory for evaluation output.")
     ] = Path("runs"),
     use_k8s: Annotated[bool, typer.Option("--use-k8s", help=_K8S_FLAG_HELP)] = False,
+    k8s_namespace: Annotated[
+        str, typer.Option("--k8s-namespace", help=_K8S_NAMESPACE_HELP)
+    ] = "default",
 ) -> None:
     """Evaluate one configuration against a full task pack.
 
@@ -269,7 +292,7 @@ def eval_(
     cfg = _resolve_config(config, model)
     pack_obj = TaskPack.from_path(pack)
     trajectories = []
-    with _build_harness(use_k8s=use_k8s) as harness:
+    with _build_harness(use_k8s=use_k8s, k8s_namespace=k8s_namespace) as harness:
         for task_obj in pack_obj.tasks:
             trajectory = harness.run(task_obj, cfg)
             out_path = output_dir / f"{trajectory.task_id}.{cfg.name}.json"
