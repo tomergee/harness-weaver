@@ -15,6 +15,13 @@ Re-record with::
         --config single-agent-basic \\
         --model claude-haiku-4-5-20251001
 
+The recorder prints the new cassette's SHA-256 to stderr — paste it
+into :data:`EXPECTED_SHA256` below and commit both the .pkl and the
+test-file change together. The replay path verifies the hash before
+unpickling (PR #12 review on pickle.loads); a mismatch raises
+:class:`CassetteIntegrityError` instead of executing whatever the
+.pkl contains.
+
 If the test fails after a SDK upgrade, the most likely cause is that
 the SDK shipped a class rename / field change. Inspect the failure
 and re-record.
@@ -32,11 +39,18 @@ from harness_weaver.configurations import configuration_by_name
 from harness_weaver.harness import Harness
 from harness_weaver.task import Task
 from harness_weaver.trajectory import FinalAnswer, ToolUse
-from tests._cassette import replay_query
+from tests._cassette import CassetteIntegrityError, replay_query
 
 CASSETTE_DIR = Path(__file__).parent / "cassettes"
 CASSETTE_NAME = "discovery-mood-tense.single-agent-basic.pkl"
 TASK_PATH = Path(__file__).resolve().parents[1] / "examples" / "tasks" / "discovery-mood-tense.json"
+
+# SHA-256 of the committed cassette. Verified before any pickle.loads
+# call so a tampered/replaced .pkl trips the integrity gate instead of
+# being deserialized. Re-recording the cassette legitimately changes
+# this value — the recorder prints the new digest to stderr; commit
+# the .pkl and this constant together.
+EXPECTED_SHA256 = "d297a3daf8b7814702756bd5c486de59409cbd17babe8f77f9bcbfe16a9a74a8"
 
 
 @pytest.mark.e2e
@@ -60,7 +74,7 @@ def test_replay_cassette_produces_trajectory() -> None:
         update={"model": "claude-haiku-4-5-20251001"}
     )
 
-    runner = RealAgentRunner(query_fn=replay_query(cassette))
+    runner = RealAgentRunner(query_fn=replay_query(cassette, expected_sha256=EXPECTED_SHA256))
     harness = Harness(catalog=Catalog.load_default(), runner=runner)
     trajectory = harness.run(task, cfg)
 
@@ -103,8 +117,8 @@ def test_replay_cassette_is_deterministic() -> None:
 
     catalog = Catalog.load_default()
 
-    runner_a = RealAgentRunner(query_fn=replay_query(cassette))
-    runner_b = RealAgentRunner(query_fn=replay_query(cassette))
+    runner_a = RealAgentRunner(query_fn=replay_query(cassette, expected_sha256=EXPECTED_SHA256))
+    runner_b = RealAgentRunner(query_fn=replay_query(cassette, expected_sha256=EXPECTED_SHA256))
 
     traj_a = Harness(catalog=catalog, runner=runner_a).run(task, cfg)
     traj_b = Harness(catalog=catalog, runner=runner_b).run(task, cfg)
@@ -125,3 +139,27 @@ def test_replay_cassette_is_deterministic() -> None:
     events_b = _strip_ts(traj_b.events)
     assert events_a == events_b
     assert traj_a.final_answer == traj_b.final_answer
+
+
+def test_replay_rejects_tampered_cassette(tmp_path: Path) -> None:
+    """PR #12 review: the SHA-256 integrity gate must fire before
+    ``pickle.loads`` runs. A tampered .pkl (e.g. a malicious PR swapping
+    the bytes for a pickle bomb) should raise ``CassetteIntegrityError``,
+    not execute the payload.
+    """
+    import asyncio
+
+    bad_path = tmp_path / "tampered.pkl"
+    bad_path.write_bytes(b"definitely not a real pickle of SDK messages")
+
+    iterator = replay_query(
+        bad_path,
+        expected_sha256="0" * 64,  # any known-bad hash; mismatch is what we test
+    )()
+
+    async def _drain() -> None:
+        async for _ in iterator:
+            pass
+
+    with pytest.raises(CassetteIntegrityError):
+        asyncio.run(_drain())
