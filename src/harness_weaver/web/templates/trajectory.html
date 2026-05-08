@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ filename }} — harness-weaver{% endblock %}
+{% block content %}
+<h1>Trajectory</h1>
+<p class="meta">
+  <code>{{ filename }}</code>
+  &nbsp;·&nbsp;
+  task: <strong>{{ trajectory.task_id }}</strong>
+  &nbsp;·&nbsp;
+  config: <strong>{{ trajectory.configuration_name }}</strong>
+</p>
+
+<dl class="summary">
+  <dt>Started</dt><dd>{{ trajectory.started_at }}</dd>
+  <dt>Completed</dt><dd>{{ trajectory.completed_at }}</dd>
+  {% if trajectory.num_turns is not none %}
+    <dt>Turns</dt><dd>{{ trajectory.num_turns }}</dd>
+  {% endif %}
+  {% if trajectory.total_cost_usd is not none %}
+    <dt>Cost (USD)</dt><dd>${{ "%.6f"|format(trajectory.total_cost_usd) }}</dd>
+  {% endif %}
+</dl>
+
+<h2>Final answer</h2>
+{% if trajectory.final_answer %}
+  <pre class="final-answer">{{ trajectory.final_answer }}</pre>
+{% else %}
+  <p class="empty">No final answer recorded.</p>
+{% endif %}
+
+<h2>Events ({{ trajectory.events|length }})</h2>
+<ol class="timeline">
+  {% for event in trajectory.events %}
+    <li class="event event--{{ event.type }}">
+      <span class="badge">{{ event.type }}</span>
+      {% if event.type == "user_message" %}
+        <pre>{{ event.content }}</pre>
+      {% elif event.type == "assistant_message" %}
+        <pre>{{ event.content }}</pre>
+      {% elif event.type == "tool_use" %}
+        <code>{{ event.tool_name }}({{ event.arguments|tojson }})</code>
+      {% elif event.type == "tool_result" %}
+        <code>{{ event.tool_name }} → </code>
+        <pre>{{ event.result|tojson(indent=2) }}</pre>
+      {% elif event.type == "final_answer" %}
+        <pre>{{ event.text }}</pre>
+      {% else %}
+        <pre>{{ event|tojson(indent=2) }}</pre>
+      {% endif %}
+    </li>
+  {% endfor %}
+</ol>
+{% endblock %}

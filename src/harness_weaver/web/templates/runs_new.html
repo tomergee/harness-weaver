@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}harness-weaver — new run{% endblock %}
+{% block content %}
+<h1>New run</h1>
+
+<p class="warning">
+  Submitting will block your browser for ~20-60 seconds while the harness
+  drives the SDK. Don't refresh — the page will redirect to the trajectory
+  when the run finishes.
+</p>
+
+<form method="post" action="/runs/new" class="run-form">
+  <label>
+    Task
+    <select name="task" required>
+      {% for t in tasks %}
+        <option value="{{ t }}">{{ t }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>
+    Configuration
+    <select name="config" required>
+      {% for c in configs %}
+        <option value="{{ c.name }}">{{ c.name }} — {{ c.description }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>
+    Model override (optional)
+    <input type="text" name="model" placeholder="claude-haiku-4-5-20251001">
+  </label>
+
+  <fieldset>
+    <legend>Execution backend</legend>
+    <label class="inline">
+      <input type="checkbox" name="use_k8s" value="true">
+      Use Kubernetes sandbox
+    </label>
+    <label>
+      K8s namespace
+      <input type="text" name="k8s_namespace" value="default">
+    </label>
+  </fieldset>
+
+  <button type="submit">Run</button>
+</form>
+{% endblock %}

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}harness-weaver — index{% endblock %}
+{% block content %}
+<h1>harness-weaver</h1>
+
+<p class="lede">
+  Experimentation harness for agentic systems on recommendation-style tasks.
+  Pick an action below or browse existing trajectories and reports under
+  <code>runs/</code>.
+</p>
+
+<section class="actions">
+  <a class="card" href="/runs/new">
+    <h3>run</h3>
+    <p>One task, one configuration. Outputs a trajectory.</p>
+  </a>
+  <a class="card" href="/compare/new">
+    <h3>compare</h3>
+    <p>Two configurations, same task. Structural diff + optional LLM verdict.</p>
+  </a>
+  <a class="card" href="/eval/new">
+    <h3>eval</h3>
+    <p>One configuration over a task pack. Aggregate summary.</p>
+  </a>
+</section>
+
+<section>
+  <h2>Trajectories</h2>
+  {% if trajectories %}
+    <ul class="filelist">
+      {% for name in trajectories %}
+        <li><a href="/trajectories/{{ name }}">{{ name }}</a></li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="empty">No trajectories yet. Kick off a <a href="/runs/new">run</a>.</p>
+  {% endif %}
+</section>
+
+<section>
+  <h2>Reports</h2>
+  {% if reports %}
+    <ul class="filelist">
+      {% for name in reports %}
+        <li><a href="/reports/{{ name }}">{{ name }}</a></li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="empty">No reports yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

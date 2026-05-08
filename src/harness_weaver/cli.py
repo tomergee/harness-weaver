@@ -311,5 +311,42 @@ def eval_(
     )
 
 
+@app.command()
+def serve(
+    host: Annotated[
+        str, typer.Option("--host", help="Address to bind. Default 127.0.0.1 (no auth!).")
+    ] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", help="TCP port to listen on.")] = 8000,
+    runs_dir: Annotated[
+        Path,
+        typer.Option(
+            "--runs-dir",
+            help="Directory the UI reads/writes trajectories and reports from.",
+        ),
+    ] = Path("runs"),
+) -> None:
+    """Start the optional web UI (requires ``pip install harness-weaver[web]``).
+
+    Server-rendered pages for kicking off run / compare / eval and
+    browsing trajectories. Single uvicorn worker, sync execution; the
+    browser blocks for the duration of each run. Bind to 127.0.0.1 by
+    default — there's no auth.
+    """
+    try:
+        import uvicorn
+
+        from harness_weaver.web import create_app
+    except ImportError as exc:  # pragma: no cover - import-time error path
+        console.print(
+            "[red]The web UI requires extra dependencies. Install with:[/red] "
+            "pip install -e '.[web]'"
+        )
+        raise typer.Exit(code=1) from exc
+
+    web_app = create_app(runs_dir=runs_dir)
+    console.print(f"harness-weaver web UI on http://{host}:{port}/")
+    uvicorn.run(web_app, host=host, port=port, log_level="info")
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ filename }} — harness-weaver{% endblock %}
+{% block content %}
+<h1>Report</h1>
+<p class="meta"><code>{{ filename }}</code></p>
+<article class="markdown-body">
+  {{ rendered_html|safe }}
+</article>
+{% endblock %}
