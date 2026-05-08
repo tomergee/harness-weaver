@@ -19,7 +19,10 @@ jump around if you already know the basics.
 6. **[Kubernetes sandbox](k8s-sandbox.md)** — running `run_python` against
    a real K8s pod via `kubernetes-sigs/agent-sandbox`. One-command Kind
    bring-up.
-7. **[Troubleshooting](troubleshooting.md)** — known gotchas, especially
+7. **[Web UI](web.md)** — optional flat HTML interface (`harness-weaver
+   serve`) for kicking off runs and browsing trajectories without the
+   CLI.
+8. **[Troubleshooting](troubleshooting.md)** — known gotchas, especially
    around live SDK runs.
 
 ## Two-minute orientation

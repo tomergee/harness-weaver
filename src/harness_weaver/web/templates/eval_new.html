@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}harness-weaver — new eval{% endblock %}
+{% block content %}
+<h1>New eval</h1>
+
+{% if error %}
+  <p class="error">{{ error }}</p>
+{% endif %}
+
+<p class="warning">
+  Submitting runs the configuration over every task in the pack — expect
+  the browser to block for several minutes on real packs. The page will
+  redirect to the markdown summary when done.
+</p>
+
+<form method="post" action="/eval/new" class="run-form">
+  <label>
+    Task pack
+    <select name="pack" required>
+      {% for p in packs %}
+        <option value="{{ p }}">{{ p }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>
+    Configuration
+    <select name="config" required>
+      {% for c in configs %}
+        <option value="{{ c.name }}">{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>
+    Model override (optional)
+    <input type="text" name="model" placeholder="claude-haiku-4-5-20251001">
+  </label>
+
+  <fieldset>
+    <legend>Execution backend</legend>
+    <label class="inline">
+      <input type="checkbox" name="use_k8s" value="true">
+      Use Kubernetes sandbox
+    </label>
+    <label>
+      K8s namespace
+      <input type="text" name="k8s_namespace" value="default">
+    </label>
+  </fieldset>
+
+  <button type="submit">Run pack</button>
+</form>
+{% endblock %}

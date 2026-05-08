@@ -32,7 +32,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          # Install the web extra alongside dev so:
+          #  (1) mypy can resolve fastapi/jinja2/bleach/markdown imports
+          #      reachable from src/harness_weaver/web (otherwise the
+          #      module's top-level imports trip "Cannot find stubs for
+          #      module"),
+          #  (2) the web test suite actually runs in CI rather than
+          #      skipping via pytest.importorskip.
+          pip install -e ".[dev,web]"
 
       - name: Ruff format check
         run: ruff format --check src tests

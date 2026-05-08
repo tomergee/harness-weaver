@@ -48,6 +48,22 @@ dev = [
     "pre-commit>=3.7",
     "vcrpy>=6.0",
     "pytest-vcr>=1.0.2",
+    # Web UI test client. Pulled in via dev so the gate exercises it.
+    "httpx>=0.27",
+]
+web = [
+    # Optional: install `harness-weaver[web]` to use the `serve` command
+    # and the simple Flask-style FastAPI UI. Kept off the core install
+    # so a CLI-only deployment doesn't pay for it.
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "markdown>=3.6",
+    # Sanitizes the markdown -> HTML output before we hand it to the
+    # template. Trajectory content contains LLM output, which we treat
+    # as untrusted (PR #11 review).
+    "bleach>=6.1",
 ]
 
 [project.scripts]
@@ -118,6 +134,11 @@ module = [
     "k8s_agent_sandbox.*",
     "inspect_ai.*",
     "vcr.*",
+    # Optional web extra. types-Markdown / types-bleach exist upstream
+    # but pulling them into dev-deps just to satisfy strict mypy isn't
+    # worth it for two third-party libs.
+    "markdown",
+    "bleach",
 ]
 ignore_missing_imports = true
 
