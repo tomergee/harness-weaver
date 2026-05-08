@@ -50,7 +50,7 @@ surface and the bundled example trajectories don't require one.
 git clone https://github.com/tomergee/harness-weaver
 cd harness-weaver
 pip install -e ".[dev]"
-make check                                 # 149 tests, ~94% coverage
+make check                                 # 272 tests, ~93% coverage
 
 harness-weaver list-configs                # see the three built-in configurations
 ```

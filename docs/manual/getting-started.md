@@ -18,7 +18,7 @@ pip install -e ".[dev]"     # `make install` does the same plus pre-commit hooks
 make check                  # ruff format + lint, mypy --strict, pytest
 ```
 
-A clean install ends with `245 passed` and the coverage gate at ≥70%
+A clean install ends with `272 passed` and the coverage gate at ≥70%
 (actual is around 93%). If something fails here, fix it before going
 further — every other section assumes the gate is green.
 
