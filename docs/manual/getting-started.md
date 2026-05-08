@@ -18,9 +18,9 @@ pip install -e ".[dev]"     # `make install` does the same plus pre-commit hooks
 make check                  # ruff format + lint, mypy --strict, pytest
 ```
 
-A clean install ends with `158 passed` and the coverage gate at ≥70%.
-If something fails here, fix it before going further — every other
-section assumes the gate is green.
+A clean install ends with `245 passed` and the coverage gate at ≥70%
+(actual is around 93%). If something fails here, fix it before going
+further — every other section assumes the gate is green.
 
 ## Your first run, without an API key
 
@@ -76,7 +76,10 @@ Inspect the trajectory:
 python -m json.tool runs/discovery-mood-tense.single-agent-basic.json | head -40
 ```
 
-Each event is a discriminated-union pydantic record:
+Each event is a discriminated-union pydantic record. The trajectory
+also carries provider-reported cost and turn count when the SDK
+surfaces them (live runs); fake-runner trajectories leave both fields
+as `null`:
 
 ```json
 {
@@ -91,7 +94,9 @@ Each event is a discriminated-union pydantic record:
     ...
     { "type": "final_answer", "text": "I'd recommend Ex Machina ..." }
   ],
-  "final_answer": "I'd recommend Ex Machina ..."
+  "final_answer": "I'd recommend Ex Machina ...",
+  "total_cost_usd": 0.018768,
+  "num_turns": 5
 }
 ```
 

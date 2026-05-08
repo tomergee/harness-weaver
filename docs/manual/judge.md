@@ -54,7 +54,7 @@ the loser of the comparison).
 | `infinite_loop` | Three consecutive `ToolUse` events with identical `(tool_name, arguments)`. Different arguments don't trigger it — that's normal "tweak and retry." |
 | `off_task` | No `final_answer`, or final answer < 30 chars (the agent stalled). |
 | `refusal` | Final answer matches refusal patterns ("I can't", "I'm not able to"). Takes precedence over `off_task` so reports don't double-tag. |
-| `cost_blowup` | More than 50 tool calls. A proxy until per-run cost is recorded in the trajectory. |
+| `cost_blowup` | When the SDK reported `total_cost_usd`, fires above $0.50. When it didn't (fake runs, older SDK), falls back to a >50-tool-call proxy. Both thresholds are constants in `classifier.py`. |
 
 The thresholds are constants in
 [`src/harness_weaver/judge/classifier.py`](../../src/harness_weaver/judge/classifier.py).
