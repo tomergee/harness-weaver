@@ -16,7 +16,10 @@ jump around if you already know the basics.
    Configuration, add a Tool, swap the ExecutionBackend.
 5. **[Judging trajectories](judge.md)** — structural report, failure-mode
    classifier, LLM-as-judge with `inspect-ai`.
-6. **[Troubleshooting](troubleshooting.md)** — known gotchas, especially
+6. **[Kubernetes sandbox](k8s-sandbox.md)** — running `run_python` against
+   a real K8s pod via `kubernetes-sigs/agent-sandbox`. One-command Kind
+   bring-up.
+7. **[Troubleshooting](troubleshooting.md)** — known gotchas, especially
    around live SDK runs.
 
 ## Two-minute orientation
