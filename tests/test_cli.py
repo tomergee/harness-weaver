@@ -20,6 +20,8 @@ from harness_weaver.cli import app
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pytest
+
 runner = CliRunner()
 
 
@@ -72,3 +74,41 @@ def test_model_none_keeps_configuration_default() -> None:
 
     cfg = _resolve_config("single-agent-basic", None)
     assert cfg.model is None
+
+
+def test_build_harness_context_manager_closes_k8s_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for PR #6 review (HIGH): the K8s backend MUST be closed
+    when the CLI command finishes — otherwise every ``--use-k8s``
+    invocation leaks a sandbox pod. The ``_build_harness`` context
+    manager owns that lifecycle.
+    """
+    from unittest.mock import MagicMock
+
+    from harness_weaver.cli import _build_harness
+
+    backend_instance = MagicMock()
+    # AgentSandboxBackend supports `with`; mock the protocol explicitly.
+    backend_instance.__enter__ = MagicMock(return_value=backend_instance)
+    backend_instance.__exit__ = MagicMock(return_value=False)
+
+    fake_class = MagicMock(return_value=backend_instance)
+    monkeypatch.setattr("harness_weaver.execution.AgentSandboxBackend", fake_class)
+
+    with _build_harness(use_k8s=True):
+        pass
+
+    backend_instance.__enter__.assert_called_once()
+    backend_instance.__exit__.assert_called_once()
+
+
+def test_build_harness_no_backend_when_local() -> None:
+    """When ``use_k8s=False``, no K8s backend is constructed at all —
+    avoids the import cost and any cluster connection attempt."""
+    from harness_weaver.cli import _build_harness
+
+    with _build_harness(use_k8s=False) as harness:
+        # Local default: backend was constructed by Harness internally.
+        # We just verify no exception and that we got a Harness back.
+        assert harness is not None

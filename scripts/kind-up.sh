@@ -50,9 +50,11 @@ kubectl config use-context "kind-${CLUSTER_NAME}"
 echo "==> Installing agent-sandbox controller (${CONTROLLER_VERSION})..."
 # The upstream install manifest creates the SandboxTemplate / Sandbox CRDs
 # and the controller deployment in the agent-sandbox-system namespace.
-if ! kubectl apply -f "${CONTROLLER_MANIFEST_URL}" 2>/dev/null; then
+# Don't silence stderr — when this fails (network, RBAC, manifest 404)
+# the kubectl error is the most useful clue (PR #6 review).
+if ! kubectl apply -f "${CONTROLLER_MANIFEST_URL}"; then
     echo "ERROR: failed to apply controller manifest from ${CONTROLLER_MANIFEST_URL}"
-    echo "       Check your network access and that the URL is reachable."
+    echo "       See the kubectl error above for the specific cause."
     exit 1
 fi
 

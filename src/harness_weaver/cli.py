@@ -18,6 +18,8 @@ For programmatic use without the SDK in the loop, instantiate
 path the e2e tests exercise.
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -74,25 +76,33 @@ def list_configs() -> None:
         console.print(f"[bold]{cfg.name}[/bold]: {cfg.description}")
 
 
-def _build_harness(*, use_k8s: bool = False) -> Harness:
-    """Construct a Harness with the appropriate execution backend.
+@contextmanager
+def _build_harness(*, use_k8s: bool = False) -> Iterator[Harness]:
+    """Yield a Harness with the appropriate execution backend.
+
+    Context-manager rather than a plain factory because the K8s
+    backend provisions a real sandbox pod that *must* be terminated
+    when the CLI command finishes — otherwise every ``--use-k8s``
+    invocation leaks a pod (PR #6 review). The local-subprocess
+    backend has no state so the no-op fast path is fine.
 
     ``use_k8s=True`` swaps :class:`LocalSubprocessBackend` for
-    :class:`AgentSandboxBackend`, which provisions a sandbox pod via
-    ``kubernetes-sigs/agent-sandbox``. Requires a configured cluster
+    :class:`AgentSandboxBackend`, which expects a configured cluster
     plus the ``python`` SandboxTemplate installed; see
     ``docs/manual/k8s-sandbox.md`` for setup.
     """
-    backend = None
-    if use_k8s:
-        from harness_weaver.execution import AgentSandboxBackend
+    if not use_k8s:
+        yield Harness(catalog=Catalog.load_default(), runner=RealAgentRunner())
+        return
 
-        backend = AgentSandboxBackend()
-    return Harness(
-        catalog=Catalog.load_default(),
-        runner=RealAgentRunner(),
-        execution_backend=backend,
-    )
+    from harness_weaver.execution import AgentSandboxBackend
+
+    with AgentSandboxBackend() as backend:
+        yield Harness(
+            catalog=Catalog.load_default(),
+            runner=RealAgentRunner(),
+            execution_backend=backend,
+        )
 
 
 def _write_trajectory(trajectory_json: str, path: Path) -> None:
@@ -146,8 +156,8 @@ def run(
     """Run a single task with one configuration; emit a trajectory."""
     cfg = _resolve_config(config, model)
     task_obj = Task.from_path(task)
-    harness = _build_harness(use_k8s=use_k8s)
-    trajectory = harness.run(task_obj, cfg)
+    with _build_harness(use_k8s=use_k8s) as harness:
+        trajectory = harness.run(task_obj, cfg)
     out_path = output_dir / f"{trajectory.task_id}.{cfg.name}.json"
     _write_trajectory(trajectory.model_dump_json(indent=2), out_path)
 
@@ -197,13 +207,13 @@ def compare(
     cfg_a = _resolve_config(config_a, model)
     cfg_b = _resolve_config(config_b, model)
     task_obj = Task.from_path(task)
-    harness = _build_harness(use_k8s=use_k8s)
     trajectories = []
-    for cfg in (cfg_a, cfg_b):
-        trajectory = harness.run(task_obj, cfg)
-        out_path = output_dir / f"{trajectory.task_id}.{cfg.name}.json"
-        _write_trajectory(trajectory.model_dump_json(indent=2), out_path)
-        trajectories.append(trajectory)
+    with _build_harness(use_k8s=use_k8s) as harness:
+        for cfg in (cfg_a, cfg_b):
+            trajectory = harness.run(task_obj, cfg)
+            out_path = output_dir / f"{trajectory.task_id}.{cfg.name}.json"
+            _write_trajectory(trajectory.model_dump_json(indent=2), out_path)
+            trajectories.append(trajectory)
 
     # Structural report: always run, no API.
     report = StructuralReport.of(trajectories[0], trajectories[1], task=task_obj)
@@ -258,13 +268,13 @@ def eval_(
 
     cfg = _resolve_config(config, model)
     pack_obj = TaskPack.from_path(pack)
-    harness = _build_harness(use_k8s=use_k8s)
     trajectories = []
-    for task_obj in pack_obj.tasks:
-        trajectory = harness.run(task_obj, cfg)
-        out_path = output_dir / f"{trajectory.task_id}.{cfg.name}.json"
-        _write_trajectory(trajectory.model_dump_json(indent=2), out_path)
-        trajectories.append(trajectory)
+    with _build_harness(use_k8s=use_k8s) as harness:
+        for task_obj in pack_obj.tasks:
+            trajectory = harness.run(task_obj, cfg)
+            out_path = output_dir / f"{trajectory.task_id}.{cfg.name}.json"
+            _write_trajectory(trajectory.model_dump_json(indent=2), out_path)
+            trajectories.append(trajectory)
 
     summary = PackSummary.of(trajectories, pack=pack_obj, configuration_name=cfg.name)
     summary_path = output_dir / f"{pack_obj.name}.{cfg.name}.eval.md"

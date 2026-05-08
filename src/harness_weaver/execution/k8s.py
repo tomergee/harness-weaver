@@ -24,6 +24,8 @@ escaping issues for snippets containing quotes, backticks, or newlines.
 
 from __future__ import annotations
 
+import math
+import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -93,6 +95,12 @@ class AgentSandboxBackend(ExecutionBackend):
         self._ready_timeout = sandbox_ready_timeout
         self._cleanup_on_close = cleanup_on_close
         self._sandbox: Sandbox | None = None
+        # Serializes run() and close() — both touch ``self._sandbox`` and
+        # both write to the shared ``SNIPPET_PATH``. The harness CLI runs
+        # single-threaded so this is mostly defensive; library users who
+        # call ``run()`` from multiple threads need the protection. See
+        # PR #6 review.
+        self._lock = threading.Lock()
 
     # --- ExecutionBackend protocol ------------------------------------
 
@@ -107,17 +115,39 @@ class AgentSandboxBackend(ExecutionBackend):
                 "variables, or use LocalSubprocessBackend for now."
             )
 
-        sandbox = self._ensure_sandbox()
-        # File-staging the snippet sidesteps shell-escape pitfalls when
-        # the code contains quotes, backslashes, or newlines.
-        sandbox.files.write(SNIPPET_PATH, request.code, timeout=int(request.timeout_seconds))
+        # The SDK's timeout fields are typed ``int``; ``int(0.5) == 0``
+        # would tell the SDK "give up immediately." Round up instead so
+        # sub-second budgets become 1-second budgets rather than zero.
+        sdk_timeout = max(1, math.ceil(request.timeout_seconds))
 
-        start = time.monotonic()
-        try:
-            sb_result = sandbox.commands.run(
-                f"python3 {SNIPPET_PATH}",
-                timeout=int(request.timeout_seconds),
-            )
+        with self._lock:
+            sandbox = self._ensure_sandbox()
+            # File-staging sidesteps shell-escape pitfalls when the code
+            # contains quotes, backslashes, or newlines.
+            sandbox.files.write(SNIPPET_PATH, request.code, timeout=sdk_timeout)
+
+            start = time.monotonic()
+            try:
+                sb_result = sandbox.commands.run(
+                    f"python3 {SNIPPET_PATH}",
+                    timeout=sdk_timeout,
+                )
+            except SandboxError as exc:
+                duration = time.monotonic() - start
+                # Best-effort timeout detection: if we burned through the
+                # configured budget, treat as a timeout result rather than
+                # propagating the SDK exception. Otherwise the failure is
+                # infrastructure (port-forward broken, RBAC, etc.) and the
+                # caller should see it.
+                if duration >= request.timeout_seconds * 0.9:
+                    return ExecutionResult(
+                        exit_code=-9,
+                        stdout="",
+                        stderr=f"sandbox call timed out after {duration:.1f}s: {exc}",
+                        timed_out=True,
+                        duration_seconds=duration,
+                    )
+                raise
             duration = time.monotonic() - start
             return ExecutionResult(
                 exit_code=sb_result.exit_code,
@@ -126,22 +156,6 @@ class AgentSandboxBackend(ExecutionBackend):
                 timed_out=False,
                 duration_seconds=duration,
             )
-        except SandboxError as exc:
-            duration = time.monotonic() - start
-            # Best-effort timeout detection: if we burned through the
-            # configured budget, treat as a timeout result rather than
-            # propagating the SDK exception. Otherwise the failure is
-            # infrastructure (port-forward broken, RBAC, etc.) and the
-            # caller should see it.
-            if duration >= request.timeout_seconds * 0.9:
-                return ExecutionResult(
-                    exit_code=-9,
-                    stdout="",
-                    stderr=f"sandbox call timed out after {duration:.1f}s: {exc}",
-                    timed_out=True,
-                    duration_seconds=duration,
-                )
-            raise
 
     # --- lifecycle -----------------------------------------------------
 
@@ -159,15 +173,23 @@ class AgentSandboxBackend(ExecutionBackend):
 
         Idempotent: calling ``close()`` twice is a no-op. After ``close()``,
         the next ``run()`` provisions a fresh sandbox.
+
+        ``close_connection`` and ``terminate`` are attempted independently
+        — a connection-close failure must not skip pod termination,
+        otherwise we leave an orphan pod (PR #6 review). The reference
+        is cleared first so a partial failure can't leave us in a state
+        where the same dead handle gets re-used.
         """
-        if self._sandbox is None:
-            return
+        with self._lock:
+            if self._sandbox is None:
+                return
+            sandbox = self._sandbox
+            self._sandbox = None  # next run() will provision a fresh one
         try:
-            self._sandbox.close_connection()
-            if self._cleanup_on_close:
-                self._sandbox.terminate()
+            sandbox.close_connection()
         finally:
-            self._sandbox = None
+            if self._cleanup_on_close:
+                sandbox.terminate()
 
     def __enter__(self) -> AgentSandboxBackend:
         return self

@@ -240,3 +240,103 @@ class TestStdinRejected:
         with pytest.raises(NotImplementedError):
             backend.run(ExecutionRequest(code="print(1)", stdin="data"))
         client.create_sandbox.assert_not_called()
+
+
+# --- PR #6 review fixes ---------------------------------------------
+
+
+class TestFractionalTimeoutRoundsUp:
+    """Regression for PR #6 review (HIGH): ``int(0.5)`` truncates to 0,
+    which the SDK reads as "give up immediately." Sub-second timeouts
+    must round *up* to at least 1 second so the SDK actually attempts
+    the call."""
+
+    def test_sub_second_timeout_floors_at_one(self) -> None:
+        sandbox = _fake_sandbox()
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client)
+        backend.run(ExecutionRequest(code="print(1)", timeout_seconds=0.5))
+        # Both the file write and the command run must see >= 1.
+        sandbox.files.write.assert_called_once_with(SNIPPET_PATH, "print(1)", timeout=1)
+        sandbox.commands.run.assert_called_once_with(f"python3 {SNIPPET_PATH}", timeout=1)
+
+    def test_fractional_timeout_rounds_up_not_down(self) -> None:
+        sandbox = _fake_sandbox()
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client)
+        # 5.1s → 6, not 5. Truncating would silently shorten the budget.
+        backend.run(ExecutionRequest(code="print(1)", timeout_seconds=5.1))
+        sandbox.commands.run.assert_called_once_with(f"python3 {SNIPPET_PATH}", timeout=6)
+
+    def test_integer_timeout_passes_through_unchanged(self) -> None:
+        sandbox = _fake_sandbox()
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client)
+        backend.run(ExecutionRequest(code="print(1)", timeout_seconds=30))
+        sandbox.commands.run.assert_called_once_with(f"python3 {SNIPPET_PATH}", timeout=30)
+
+
+class TestCloseResilientToCloseConnectionError:
+    """Regression for PR #6 review (MED): ``close_connection`` raising
+    must not skip ``terminate``. Otherwise we leave an orphan pod
+    every time the connection-close path errors."""
+
+    def test_close_connection_error_does_not_skip_terminate(self) -> None:
+        sandbox = _fake_sandbox()
+        sandbox.close_connection.side_effect = RuntimeError("port-forward dead")
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client)
+        backend.run(ExecutionRequest(code="print(1)"))
+        with pytest.raises(RuntimeError, match="port-forward"):
+            backend.close()
+        # terminate was attempted despite the close_connection failure.
+        sandbox.terminate.assert_called_once()
+
+    def test_close_idempotent_after_partial_failure(self) -> None:
+        sandbox = _fake_sandbox()
+        sandbox.close_connection.side_effect = RuntimeError("oops")
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client)
+        backend.run(ExecutionRequest(code="print(1)"))
+        with pytest.raises(RuntimeError):
+            backend.close()
+        # Even after a partial failure, the sandbox reference is cleared
+        # so a second close() is a clean no-op (rather than re-attempting
+        # operations on a broken handle).
+        backend.close()  # must not raise
+        # Each operation called exactly once across the two close() calls.
+        assert sandbox.close_connection.call_count == 1
+        assert sandbox.terminate.call_count == 1
+
+
+class TestThreadingLockUsed:
+    """Regression for PR #6 review (MED): concurrent run() calls would
+    have raced to overwrite ``/tmp/snippet.py``. We protect run() and
+    close() with a Lock; verify it's actually wired."""
+
+    def test_run_acquires_lock(self) -> None:
+        sandbox = _fake_sandbox()
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client)
+        # Replace the lock with a MagicMock so we can observe acquire/release.
+        observed_lock = MagicMock()
+        observed_lock.__enter__ = MagicMock(return_value=None)
+        observed_lock.__exit__ = MagicMock(return_value=False)
+        backend._lock = observed_lock  # type: ignore[assignment]
+
+        backend.run(ExecutionRequest(code="print(1)"))
+        observed_lock.__enter__.assert_called()
+        observed_lock.__exit__.assert_called()
+
+    def test_close_acquires_lock(self) -> None:
+        sandbox = _fake_sandbox()
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client)
+        backend.run(ExecutionRequest(code="print(1)"))
+
+        observed_lock = MagicMock()
+        observed_lock.__enter__ = MagicMock(return_value=None)
+        observed_lock.__exit__ = MagicMock(return_value=False)
+        backend._lock = observed_lock  # type: ignore[assignment]
+        backend.close()
+        observed_lock.__enter__.assert_called()
