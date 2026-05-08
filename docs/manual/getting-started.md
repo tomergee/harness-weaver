@@ -122,3 +122,16 @@ multi-agent-discovery-explainer: Orchestrator delegates discovery ...
 
 If `list-configs` works and `make check` is green, you're ready to
 move on to [Concepts](concepts.md).
+
+## Prefer a UI?
+
+If poking at it in a browser is more your thing, install the optional
+`web` extra and start the server:
+
+```bash
+pip install -e ".[web]"
+harness-weaver serve --host 127.0.0.1 --port 8000
+```
+
+Then open <http://127.0.0.1:8000>. The full walk-through (pages,
+caveats, programmatic use) is in [Web UI](web.md).
