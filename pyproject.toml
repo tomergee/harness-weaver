@@ -9,7 +9,7 @@ description = "An experimentation harness for agentic systems on recommendation-
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Tomer", email = "you@example.com" }]
+authors = [{ name = "Tomer", email = "tomergee@users.noreply.github.com" }]
 keywords = ["agents", "llm", "mcp", "evaluation", "sandbox", "anthropic"]
 classifiers = [
     "Development Status :: 3 - Alpha",

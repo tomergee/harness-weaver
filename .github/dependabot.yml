@@ -1,0 +1,42 @@
+# Dependabot config — keeps the floors under our SDK pins from going
+# stale silently. claude-agent-sdk, inspect-ai, and k8s-agent-sandbox
+# all move fast; without this, "works for me" drifts away from "works
+# in CI" without warning.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      sdk-stack:
+        patterns:
+          - "claude-agent-sdk"
+          - "mcp"
+          - "anthropic"
+      eval-stack:
+        patterns:
+          - "inspect-ai"
+      sandbox-stack:
+        patterns:
+          - "k8s-agent-sandbox"
+      tooling:
+        patterns:
+          - "pytest*"
+          - "mypy"
+          - "ruff"
+          - "pre-commit"
+          - "vcrpy"
+        update-types:
+          - "minor"
+          - "patch"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    labels:
+      - "ci"

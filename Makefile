@@ -1,14 +1,15 @@
-.PHONY: help install fmt lint typecheck test test-cov check clean kind-up kind-down install-sandbox
+.PHONY: help install fmt fmt-check lint typecheck test test-cov check clean kind-up kind-down install-sandbox
 
 help:
 	@echo "Targets:"
 	@echo "  install          install package and dev deps; install pre-commit hooks"
-	@echo "  fmt              format code with ruff"
+	@echo "  fmt              format code with ruff (mutating; run before committing)"
+	@echo "  fmt-check        check formatting without mutating (matches CI)"
 	@echo "  lint             lint code with ruff"
 	@echo "  typecheck        run mypy --strict"
 	@echo "  test             run pytest"
 	@echo "  test-cov         run pytest with coverage report"
-	@echo "  check            fmt + lint + typecheck + test (the gate before opening a PR)"
+	@echo "  check            fmt-check + lint + typecheck + test (the gate before opening a PR; matches CI)"
 	@echo "  clean            remove build artifacts and caches"
 	@echo "  install-sandbox  install agent-sandbox controller + python template into the current kubectl context"
 	@echo "  kind-up          bring up a fresh Kind cluster AND install the controller + template"
@@ -20,6 +21,9 @@ install:
 
 fmt:
 	ruff format src tests
+
+fmt-check:
+	ruff format --check src tests
 
 lint:
 	ruff check src tests
@@ -34,7 +38,7 @@ test-cov:
 	pytest --cov-report=html
 	@echo "Coverage report: htmlcov/index.html"
 
-check: fmt lint typecheck test
+check: fmt-check lint typecheck test
 	@echo "All checks passed."
 
 clean:
