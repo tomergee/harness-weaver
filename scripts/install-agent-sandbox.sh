@@ -10,10 +10,12 @@
 #   1. Verifies kubectl is on PATH.
 #   2. Shows the kubectl context it's about to modify (one last chance to
 #      Ctrl-C if you're aimed at the wrong cluster).
-#   3. Applies the upstream agent-sandbox controller manifest, which
-#      creates the SandboxTemplate / Sandbox CRDs and the controller
-#      Deployment in the agent-sandbox-system namespace.
-#   4. Waits up to 3 minutes for the controller to become Ready.
+#   3. Applies the upstream core manifest (Sandbox CRD + controller) and
+#      the matching extensions manifest (SandboxClaim, SandboxTemplate CRDs,
+#      RBAC). The k8s-agent-sandbox Python client uses SandboxClaim and
+#      requires both artifacts from the same release tag.
+#   4. Waits up to 3 minutes for the controller to become Ready after each
+#      apply (extensions may roll the Deployment).
 #   5. Applies the bundled scripts/python-sandbox-template.yaml to your
 #      target namespace (default: 'default') so the harness's
 #      AgentSandboxBackend can spawn pods from template "python".
@@ -41,6 +43,7 @@ SKIP_CONFIRM="${SKIP_CONFIRM:-0}"
 # not a raw file pulled from a branch. See README.md of
 # kubernetes-sigs/agent-sandbox for the documented install command.
 CONTROLLER_MANIFEST_URL="https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${CONTROLLER_VERSION}/manifest.yaml"
+EXTENSIONS_MANIFEST_URL="https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${CONTROLLER_VERSION}/extensions.yaml"
 TEMPLATE_PATH="$(cd "$(dirname "$0")/.." && pwd)/scripts/python-sandbox-template.yaml"
 
 require() {
@@ -104,6 +107,24 @@ if ! kubectl -n agent-sandbox-system wait \
 fi
 
 echo
+echo "==> Applying agent-sandbox extensions manifest (SandboxClaim / SandboxTemplate CRDs)..."
+if ! kubectl apply -f "${EXTENSIONS_MANIFEST_URL}"; then
+    echo "ERROR: failed to apply extensions manifest from ${EXTENSIONS_MANIFEST_URL}"
+    echo "       See the kubectl error above for the specific cause."
+    exit 1
+fi
+
+echo
+echo "==> Waiting for controller rollout after extensions (up to 3 minutes)..."
+if ! kubectl -n agent-sandbox-system wait \
+    --for=condition=Available deployment \
+    --all --timeout=180s; then
+    echo "ERROR: controller did not become ready within 3 minutes after extensions."
+    echo "       Inspect: kubectl -n agent-sandbox-system get pods"
+    exit 1
+fi
+
+echo
 echo "==> Applying 'python' SandboxTemplate to namespace '${NAMESPACE}'..."
 # Make sure the namespace exists; default 'default' always does, but a
 # user-supplied namespace might not.
@@ -135,4 +156,5 @@ echo "         --use-k8s"
 echo
 echo "To uninstall later:"
 echo "  kubectl delete -n ${NAMESPACE} -f scripts/python-sandbox-template.yaml"
+echo "  kubectl delete -f ${EXTENSIONS_MANIFEST_URL}"
 echo "  kubectl delete -f ${CONTROLLER_MANIFEST_URL}"
