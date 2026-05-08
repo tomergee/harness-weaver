@@ -15,7 +15,7 @@
 git clone https://github.com/tomergee/harness-weaver
 cd harness-weaver
 pip install -e ".[dev]"     # `make install` does the same plus pre-commit hooks
-make check                  # ruff format + lint, mypy --strict, pytest
+make check                  # ruff format --check + lint, mypy --strict, pytest
 ```
 
 A clean install ends with `272 passed` and the coverage gate at ≥70%

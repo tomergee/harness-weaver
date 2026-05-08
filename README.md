@@ -354,6 +354,103 @@ Run `make check` to verify everything before opening a PR.
 
 ---
 
+## Built with
+
+The harness is glue around a small set of focused libraries. Credit
+where it's due:
+
+### Agent runtime and protocol
+
+- **[Claude Agent SDK][cas]** ([`claude-agent-sdk`][casp]) — drives the
+  model loop, hierarchical subagents, and the `Task` delegation
+  primitive that ADR-0002 is built on. Wrapped by `RealAgentRunner`.
+- **[Model Context Protocol][mcp]** (`mcp`) — the wire format the SDK
+  uses to call our tools. Our `mcp_server.py` exposes the tool
+  registry as an in-process MCP server (see [ADR-0004][adr4]).
+- **[Anthropic API][anthropic]** (`anthropic` Python SDK) — the
+  underlying provider. Held constant across configurations; what we
+  vary is everything around it.
+
+### Sandboxed execution
+
+- **[`kubernetes-sigs/agent-sandbox`][k8s-as]** ([`k8s-agent-sandbox`][kasp])
+  — provisions per-Harness sandbox pods on a Kubernetes cluster.
+  Wrapped by `AgentSandboxBackend`; lifecycle in [ADR-0003][adr3].
+- **[Kind][kind]** + **Docker** — local-cluster bring-up used by
+  `make kind-up`. Production-cluster paths (Docker Desktop, GKE, EKS)
+  work too via `make install-sandbox`.
+
+### Eval
+
+- **[inspect-ai][inspect-ai]** — drives the LLM-as-judge model call.
+  Provider-portable so the judge isn't bolted to the same SDK that
+  drives the agents under test (see [ADR-0005][adr5]).
+
+### Validation, CLI, and UX
+
+- **[Pydantic v2][pydantic]** — every public model is a frozen
+  pydantic v2 type. Discriminated unions for `Trajectory.events`;
+  `model_validator` for cross-field invariants.
+- **[Typer][typer]** — the `harness-weaver` CLI.
+- **[Rich][rich]** — terminal rendering on the CLI.
+
+### Optional web UI
+
+- **[FastAPI][fastapi]** + **[Uvicorn][uvicorn]** — server for
+  `harness-weaver serve` (gated behind the `[web]` extra).
+- **[Jinja2][jinja2]** — server-rendered templates. No SPA, no JS
+  framework.
+- **[Markdown][markdown]** — renders `compare` and `eval` reports as
+  HTML.
+
+### Test, lint, type, format
+
+- **[pytest][pytest]** + **pytest-cov**, **pytest-asyncio**,
+  **pytest-vcr**.
+- **[mypy][mypy]** in `--strict` mode from day one.
+- **[Ruff][ruff]** for lint **and** formatting (single tool, fast).
+- **[pre-commit][pre-commit]** runs the formatter + a couple of
+  basic checks on every commit.
+- **[vcrpy][vcrpy]** — listed for completeness; the cassette-backed
+  e2e ended up not using it (the SDK runs as a child process, so
+  HTTP-boundary VCR can't see the model traffic). We pickle the SDK
+  message stream instead.
+
+### CI / repo
+
+- **[GitHub Actions][gha]** — matrix CI on Python 3.11 / 3.12.
+- **[Dependabot][dependabot]** — weekly bumps for pip + actions,
+  grouped by stack (SDK / eval / sandbox / tooling).
+- **[gemini-code-assist][gemini-code-assist]** — automated review
+  bot that left the inline comments threaded through every PR in
+  this repo.
+
+[casp]: https://pypi.org/project/claude-agent-sdk/
+[anthropic]: https://github.com/anthropics/anthropic-sdk-python
+[kasp]: https://pypi.org/project/k8s-agent-sandbox/
+[kind]: https://kind.sigs.k8s.io/
+[inspect-ai]: https://inspect.aisi.org.uk/
+[pydantic]: https://docs.pydantic.dev/
+[typer]: https://typer.tiangolo.com/
+[rich]: https://rich.readthedocs.io/
+[fastapi]: https://fastapi.tiangolo.com/
+[uvicorn]: https://www.uvicorn.org/
+[jinja2]: https://jinja.palletsprojects.com/
+[markdown]: https://python-markdown.github.io/
+[pytest]: https://docs.pytest.org/
+[mypy]: https://mypy-lang.org/
+[ruff]: https://docs.astral.sh/ruff/
+[pre-commit]: https://pre-commit.com/
+[vcrpy]: https://vcrpy.readthedocs.io/
+[gha]: https://docs.github.com/en/actions
+[dependabot]: https://docs.github.com/en/code-security/dependabot
+[gemini-code-assist]: https://github.com/apps/gemini-code-assist
+[adr3]: docs/adr/0003-sandbox-lifecycle.md
+[adr4]: docs/adr/0004-mcp-transport-in-process.md
+[adr5]: docs/adr/0005-judge-design.md
+
+---
+
 ## License
 
 MIT.

@@ -7,8 +7,7 @@ Thanks for poking at this. Here's the shortest path from clone to PR.
 ```bash
 git clone https://github.com/tomergee/harness-weaver
 cd harness-weaver
-pip install -e ".[dev]"
-pre-commit install        # ruff + ruff-format on commit
+make install              # installs the package in editable mode + pre-commit hooks
 ```
 
 `ANTHROPIC_API_KEY` is **only** needed for live SDK runs (`harness-weaver
@@ -24,9 +23,19 @@ make check
 ```
 
 That runs `fmt-check + lint + typecheck + test` — the same set CI runs
-on push. If `fmt-check` fails, run `make fmt` to apply formatting and
-re-run the gate. `make check` is intentionally non-mutating so a
-locally-passing run cannot fail CI on the same files.
+on push. `make check` is intentionally non-mutating so a locally-passing
+run cannot fail CI on the same files.
+
+If the gate fails:
+
+* **Formatting drift?** `make fmt` rewrites files in place to match.
+  Then re-run `make check`.
+* **Lint errors?** `ruff check src tests --fix` autofixes the easy
+  ones; manual edits for the rest. (`make fmt` deliberately doesn't
+  run `--fix` — it only handles formatting, so a fresh format pass
+  doesn't accidentally reshape code beyond layout.)
+* **Mypy or pytest failures?** Read the error and fix the underlying
+  issue. No autofix here.
 
 Coverage is gated at 70% in `pyproject.toml`; CI rejects regressions.
 
