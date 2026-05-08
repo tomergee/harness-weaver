@@ -8,20 +8,22 @@
 # Fields are deliberately conservative — small CPU/memory request and limit,
 # no networking egress restrictions (the harness's run_python is for data
 # manipulation, not network calls; tighten via NetworkPolicy if you want).
-apiVersion: agents.x-k8s.io/v1alpha1
+#
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
 kind: SandboxTemplate
 metadata:
   name: python
 spec:
-  podSpec:
-    containers:
-      - name: sandbox
-        image: python:3.11-slim
-        command: ["sleep", "infinity"]  # the controller exec()s into here
-        resources:
-          requests:
-            cpu: "100m"
-            memory: "256Mi"
-          limits:
-            cpu: "500m"
-            memory: "1Gi"
+  podTemplate:
+    spec:
+      containers:
+        - name: sandbox
+          image: python:3.11-slim
+          command: ["sleep", "infinity"]  # the controller exec()s into here
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"

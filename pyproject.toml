@@ -36,6 +36,9 @@ dependencies = [
     "pydantic>=2.7",
     "typer>=0.12",
     "rich>=13.7",
+    # CLI / serve: load .env from repo or parent workspace without clobbering
+    # variables already exported in the shell.
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
