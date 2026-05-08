@@ -237,11 +237,12 @@ def test_post_compare_new_writes_report(
     response = client.post(
         "/compare/new",
         data={
+            # Same config name on both legs — exercises the per-leg
+            # filename suffix (PR #11 review #3). Without the suffix the
+            # second trajectory would overwrite the first.
             "task": "examples/tasks/discovery-mood-tense.json",
-            # Two distinct configs so the per-config trajectory files don't
-            # share a filename and overwrite each other.
             "config_a": "single-agent-basic",
-            "config_b": "single-agent-with-sandbox",
+            "config_b": "single-agent-basic",
             "model": "",
             "judge_model": "",
             "k8s_namespace": "default",
@@ -253,7 +254,8 @@ def test_post_compare_new_writes_report(
     # The redirect should land on the report.
     assert response.headers["location"].startswith("/reports/")
 
-    # Two trajectories + one report written.
+    # Two trajectories + one report written. With the .0/.1 suffix even
+    # same-config compare keeps both legs on disk.
     json_files = list(tmp_runs_dir.glob("*.json"))
     md_files = list(tmp_runs_dir.glob("*.md"))
     assert len(md_files) == 1
@@ -358,6 +360,81 @@ def test_report_view_renders_markdown(client: TestClient, tmp_runs_dir: Path) ->
 def test_report_view_404_for_missing_file(client: TestClient) -> None:
     response = client.get("/reports/no-such.md")
     assert response.status_code == 404
+
+
+def test_report_view_sanitizes_html(client: TestClient, tmp_runs_dir: Path) -> None:
+    """PR #11 review: markdown content can carry LLM output which we
+    treat as untrusted. <script> and inline event handlers must be
+    stripped before reaching the browser.
+    """
+    body = (
+        "# Title\n\n"
+        "<script>alert('xss')</script>\n\n"
+        "<img src=x onerror=alert('xss')>\n\n"
+        "Plain text with [a link](https://example.com).\n"
+    )
+    (tmp_runs_dir / "evil.md").write_text(body, encoding="utf-8")
+
+    response = client.get("/reports/evil.md")
+
+    assert response.status_code == 200
+    # Allowed content survives.
+    assert "<h1>Title</h1>" in response.text
+    assert 'href="https://example.com"' in response.text
+    # Executable surfaces are gone. Bleach's strip mode removes the
+    # <script> tag and the onerror attribute; any leftover text content
+    # is harmless because the browser only renders it as text. We assert
+    # on the dangerous *attributes* and *tags*, not on the text body.
+    assert "<script" not in response.text
+    assert "</script" not in response.text
+    assert "onerror" not in response.text
+
+
+def test_report_view_surfaces_verdict_when_present(client: TestClient, tmp_runs_dir: Path) -> None:
+    """PR #11 review: when --judge-model wrote a verdict alongside a
+    compare report, the report page must surface it. Otherwise the
+    user paid for a verdict they never see.
+    """
+    (tmp_runs_dir / "alpha.compare.md").write_text("# Compare\n", encoding="utf-8")
+    (tmp_runs_dir / "alpha.compare.verdict.json").write_text(
+        json.dumps(
+            {
+                "winner": "a",
+                "confidence": 0.78,
+                "reasoning": "Distinctive verdict reasoning text.",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/reports/alpha.compare.md")
+
+    assert response.status_code == 200
+    assert "Judge verdict" in response.text
+    assert "Distinctive verdict reasoning text." in response.text
+    assert "0.78" in response.text
+
+
+def test_report_view_no_verdict_section_when_absent(client: TestClient, tmp_runs_dir: Path) -> None:
+    """A compare report without a sibling verdict file should not
+    render the verdict section at all (no empty 'winner: None' UI)."""
+    (tmp_runs_dir / "beta.compare.md").write_text("# Compare\n", encoding="utf-8")
+
+    response = client.get("/reports/beta.compare.md")
+
+    assert response.status_code == 200
+    assert "Judge verdict" not in response.text
+
+
+def test_runs_new_form_renders_error_message(client: TestClient) -> None:
+    """PR #11 review: the redirect carries ``error=bad_task_path`` but
+    the form has to actually display it for the user to know what
+    went wrong.
+    """
+    response = client.get("/runs/new?error=bad_task_path")
+
+    assert response.status_code == 200
+    assert "Task path must be inside the repository" in response.text
 
 
 def test_post_runs_new_uses_model_override(

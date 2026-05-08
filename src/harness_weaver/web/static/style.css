@@ -166,6 +166,36 @@ h2 { margin-top: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 0
   font-size: 0.9rem;
 }
 
+.error {
+  background: #fff5f5;
+  border: 1px solid #fc8181;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  color: #742a2a;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.verdict {
+  background: var(--card);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 0.75rem 1rem 1rem;
+  margin: 1rem 0 1.25rem;
+}
+.verdict h2 {
+  margin: 0 0 0.5rem;
+  border: 0;
+  padding: 0;
+  font-size: 1.05rem;
+  color: var(--accent);
+}
+.verdict-reasoning {
+  margin: 0.5rem 0 0;
+  color: var(--fg);
+  white-space: pre-wrap;
+}
+
 /* Trajectory view. */
 .meta { color: var(--muted); font-size: 0.9rem; }
 

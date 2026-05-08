@@ -3,6 +3,25 @@
 {% block content %}
 <h1>Report</h1>
 <p class="meta"><code>{{ filename }}</code></p>
+
+{% if verdict %}
+  <section class="verdict">
+    <h2>Judge verdict</h2>
+    <dl class="summary">
+      <dt>Winner</dt><dd><strong>{{ verdict.winner }}</strong></dd>
+      <dt>Confidence</dt>
+      <dd>
+        {% if verdict.confidence is defined %}
+          {{ "%.2f"|format(verdict.confidence) }}
+        {% else %}—{% endif %}
+      </dd>
+    </dl>
+    {% if verdict.reasoning %}
+      <p class="verdict-reasoning">{{ verdict.reasoning }}</p>
+    {% endif %}
+  </section>
+{% endif %}
+
 <article class="markdown-body">
   {{ rendered_html|safe }}
 </article>

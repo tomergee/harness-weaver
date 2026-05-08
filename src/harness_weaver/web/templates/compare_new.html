@@ -3,6 +3,10 @@
 {% block content %}
 <h1>New compare</h1>
 
+{% if error %}
+  <p class="error">{{ error }}</p>
+{% endif %}
+
 <p class="warning">
   Submitting will block your browser for ~30-90 seconds — two runs back to
   back, plus a judge call if you fill the judge model field.

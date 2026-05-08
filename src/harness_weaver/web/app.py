@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+import bleach
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -179,6 +180,110 @@ def _runs_output(runs_dir: Path) -> Iterator[Path]:
     yield runs_dir
 
 
+def _find_repo_root() -> Path:
+    """Best-effort discovery of a harness-weaver checkout.
+
+    Walks up from the current working directory looking for an
+    ``examples/`` sibling. Falls back to ``Path.cwd()`` if nothing
+    matches — the form pickers will simply be empty in that case
+    rather than blowing up. The previous ``parents[3]`` heuristic
+    only worked when the package was installed as an editable source
+    checkout (PR #11 review): wheel installs put us at
+    ``site-packages/harness_weaver/web/app.py``, where ``parents[3]``
+    is some random directory that won't have ``examples/``.
+    """
+    here = Path.cwd().resolve()
+    for candidate in (here, *here.parents):
+        if (candidate / "examples").is_dir():
+            return candidate
+    return Path.cwd()
+
+
+# Bleach allowlist for the markdown -> HTML pipeline. Reports embed
+# trajectory snippets and LLM output (PR #11 review on XSS), both
+# untrusted. Stick to a narrow tag set that covers `tables` and
+# `fenced_code` extensions and nothing scriptable.
+_ALLOWED_TAGS: frozenset[str] = frozenset(
+    {
+        "a",
+        "blockquote",
+        "br",
+        "code",
+        "em",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "li",
+        "ol",
+        "p",
+        "pre",
+        "strong",
+        "table",
+        "tbody",
+        "td",
+        "th",
+        "thead",
+        "tr",
+        "ul",
+    }
+)
+_ALLOWED_ATTRS: dict[str, list[str]] = {
+    "a": ["href", "title"],
+    "code": ["class"],  # for fenced_code language hints
+    "pre": ["class"],
+}
+
+
+_ERROR_MESSAGES: dict[str, str] = {
+    "bad_task_path": (
+        "Task path must be inside the repository — paths outside the "
+        "checkout (or absolute paths to system files) are rejected."
+    ),
+    "bad_pack_path": (
+        "Pack path must be inside the repository — paths outside the "
+        "checkout (or absolute paths to system files) are rejected."
+    ),
+}
+
+
+def _humanize_error(code: str) -> str:
+    """Map a redirect ``error=`` code to a human-readable message.
+
+    Returns the empty string for unknown / missing codes so templates
+    can use ``{% if error %}…`` cleanly.
+    """
+    if not code:
+        return ""
+    return _ERROR_MESSAGES.get(code, f"Unknown error: {code}")
+
+
+def _load_verdict_for_report(runs_dir: Path, report_filename: str) -> dict[str, Any] | None:
+    """If a sibling verdict JSON exists for a compare report, load it.
+
+    The compare flow writes ``<task_id>.compare.md`` *and* (when
+    ``judge_model`` was set) ``<task_id>.compare.verdict.json``. The
+    user paid for the verdict — we should not silently drop it just
+    because the redirect target is the markdown file. PR #11 review.
+    """
+    if not report_filename.endswith(".compare.md"):
+        return None
+    verdict_name = report_filename.removesuffix(".md") + ".verdict.json"
+    verdict_path = _safe_join(runs_dir, verdict_name)
+    if verdict_path is None:
+        return None
+    try:
+        loaded = json.loads(verdict_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(loaded, dict):
+        return None
+    return loaded
+
+
 def create_app(
     *,
     runs_dir: Path | str = "runs",
@@ -192,15 +297,15 @@ def create_app(
             from. Created on first use. Defaults to ``runs/`` relative
             to CWD.
         repo_root: Root used to discover example tasks and packs (under
-            ``examples/``). Defaults to the harness-weaver source repo
-            root inferred from this module's location.
+            ``examples/``). Defaults to a walk-up from CWD looking for
+            an ``examples/`` directory; falls back to CWD. Wheel
+            installs without a checkout will see empty pickers, which
+            is preferable to crashing.
         harness_factory: Constructs a Harness per request. Defaults to
             :class:`DefaultHarnessFactory`. Tests inject a fake.
     """
     runs_dir_path = Path(runs_dir)
-    repo_root_path = (
-        Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[3]
-    )
+    repo_root_path = Path(repo_root) if repo_root is not None else _find_repo_root()
     factory: HarnessFactory = harness_factory or DefaultHarnessFactory()
 
     here = Path(__file__).resolve().parent
@@ -232,7 +337,7 @@ def create_app(
         )
 
     @app.get("/runs/new", response_class=HTMLResponse)
-    def runs_new_form(request: Request) -> Any:
+    def runs_new_form(request: Request, error: str = "") -> Any:
         tasks, _ = _list_examples(repo_root_path)
         return templates.TemplateResponse(
             request,
@@ -240,6 +345,7 @@ def create_app(
             {
                 "tasks": [str(p.relative_to(repo_root_path)) for p in tasks],
                 "configs": list(builtin_configurations()),
+                "error": _humanize_error(error),
             },
         )
 
@@ -265,7 +371,7 @@ def create_app(
         return RedirectResponse(url=f"/trajectories/{out_path.name}", status_code=303)
 
     @app.get("/compare/new", response_class=HTMLResponse)
-    def compare_new_form(request: Request) -> Any:
+    def compare_new_form(request: Request, error: str = "") -> Any:
         tasks, _ = _list_examples(repo_root_path)
         return templates.TemplateResponse(
             request,
@@ -273,6 +379,7 @@ def create_app(
             {
                 "tasks": [str(p.relative_to(repo_root_path)) for p in tasks],
                 "configs": list(builtin_configurations()),
+                "error": _humanize_error(error),
             },
         )
 
@@ -296,10 +403,14 @@ def create_app(
         task_obj = Task.from_path(task_path)
         trajs: list[Trajectory] = []
         with factory(use_k8s=use_k8s, k8s_namespace=k8s_namespace) as harness:
-            for cfg in (cfg_a, cfg_b):
+            # Per-leg index in the filename so config_a == config_b doesn't
+            # cause the second trajectory to overwrite the first
+            # (PR #11 review). With distinct config names this just adds a
+            # ``.0`` / ``.1`` suffix; cheap, predictable, no surprises.
+            for index, cfg in enumerate((cfg_a, cfg_b)):
                 trajectory = harness.run(task_obj, cfg)
                 with _runs_output(runs_dir_path) as out:
-                    (out / f"{trajectory.task_id}.{cfg.name}.json").write_text(
+                    (out / f"{trajectory.task_id}.{cfg.name}.{index}.json").write_text(
                         trajectory.model_dump_json(indent=2), encoding="utf-8"
                     )
                 trajs.append(trajectory)
@@ -327,7 +438,7 @@ def create_app(
         return RedirectResponse(url=f"/reports/{report_path.name}", status_code=303)
 
     @app.get("/eval/new", response_class=HTMLResponse)
-    def eval_new_form(request: Request) -> Any:
+    def eval_new_form(request: Request, error: str = "") -> Any:
         _, packs = _list_examples(repo_root_path)
         return templates.TemplateResponse(
             request,
@@ -335,6 +446,7 @@ def create_app(
             {
                 "packs": [str(p.relative_to(repo_root_path)) for p in packs],
                 "configs": list(builtin_configurations()),
+                "error": _humanize_error(error),
             },
         )
 
@@ -394,11 +506,31 @@ def create_app(
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
             return HTMLResponse(f"Could not read report: {exc}", status_code=400)
-        html = md.markdown(text, extensions=["tables", "fenced_code"])
+        # Markdown content embeds trajectory snippets and LLM output.
+        # Bleach sanitizes any HTML the markdown renderer emits — narrow
+        # tag/attr allowlist, no <script>, no inline event handlers,
+        # nothing scriptable. PR #11 review on XSS.
+        unsafe_html = md.markdown(text, extensions=["tables", "fenced_code"])
+        rendered_html = bleach.clean(
+            unsafe_html,
+            tags=_ALLOWED_TAGS,
+            attributes=_ALLOWED_ATTRS,
+            strip=True,
+        )
+
+        # If a compare verdict was written for the same task id, surface
+        # it next to the report — otherwise an opt-in --judge-model run
+        # silently writes a JSON file the user never sees (PR #11 review).
+        verdict = _load_verdict_for_report(runs_dir_path, filename)
+
         return templates.TemplateResponse(
             request,
             "report.html",
-            {"filename": filename, "rendered_html": html},
+            {
+                "filename": filename,
+                "rendered_html": rendered_html,
+                "verdict": verdict,
+            },
         )
 
     return app
