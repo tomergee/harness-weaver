@@ -27,8 +27,12 @@ spinning a throwaway Kind cluster from scratch.
   pip install -e ".[dev]"
   ```
 
-  The `k8s-agent-sandbox` Python SDK is pinned in `pyproject.toml`,
-  so the install command above pulls it in automatically.
+  The Python client this backend uses — [`k8s-agent-sandbox`][pypi-pkg]
+  on PyPI — is pinned in `pyproject.toml` at `>=0.4,<0.5`, so the
+  install command above pulls it in automatically. No separate
+  `pip install k8s-agent-sandbox` step is needed.
+
+[pypi-pkg]: https://pypi.org/project/k8s-agent-sandbox/
 
 ## Path A — you already have a cluster
 
@@ -46,9 +50,16 @@ That runs [`scripts/install-agent-sandbox.sh`](../../scripts/install-agent-sandb
 1. Verifies `kubectl` is on `PATH` and can reach the cluster.
 2. Shows you the context name and asks for confirmation (set
    `SKIP_CONFIRM=1` to skip in CI).
-3. Applies the upstream [`kubernetes-sigs/agent-sandbox`][k8s-as]
-   controller manifest — installs the `SandboxTemplate` and `Sandbox`
-   CRDs plus the controller `Deployment` in `agent-sandbox-system`.
+3. Applies the **official release artifact** from
+   [`kubernetes-sigs/agent-sandbox`][k8s-as] —
+   `https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${CONTROLLER_VERSION}/manifest.yaml`
+   — installs the `SandboxTemplate` and `Sandbox` CRDs plus the
+   controller `Deployment` in `agent-sandbox-system`. Defaults to
+   the **`v0.4.5`** release, which is the same minor version the
+   `k8s-agent-sandbox` Python SDK is pinned to in
+   `pyproject.toml`. Override with `CONTROLLER_VERSION=v0.x.y` to
+   pick a different tag from
+   [the releases page](https://github.com/kubernetes-sigs/agent-sandbox/releases).
 4. Waits up to 3 minutes for the controller to become Ready.
 5. Applies the bundled
    [`scripts/python-sandbox-template.yaml`](../../scripts/python-sandbox-template.yaml)
@@ -63,7 +74,7 @@ Common overrides (set as env vars before `make install-sandbox`):
 | Variable | Default | Purpose |
 |---|---|---|
 | `NAMESPACE` | `default` | Target namespace for the `SandboxTemplate`. Created if missing. |
-| `CONTROLLER_VERSION` | `main` | Git ref / tag of `kubernetes-sigs/agent-sandbox` whose `manifests/install.yaml` to apply. |
+| `CONTROLLER_VERSION` | `v0.4.5` | Release tag of `kubernetes-sigs/agent-sandbox` to install. The script downloads `releases/download/${CONTROLLER_VERSION}/manifest.yaml`. Keep it within the same minor as `k8s-agent-sandbox` in `pyproject.toml` (currently `>=0.4,<0.5`). |
 | `SKIP_CONFIRM` | (unset) | Set to `1` to skip the "is this the right context?" prompt. |
 
 [k8s-as]: https://github.com/kubernetes-sigs/agent-sandbox

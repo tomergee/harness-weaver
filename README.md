@@ -133,15 +133,17 @@ per Harness — install the controller into your cluster and pass
 `--use-k8s`:
 
 ```bash
-# 1. Install harness-weaver and the k8s-agent-sandbox Python SDK
-#    (already pinned in pyproject.toml; no extra step needed).
+# 1. Install harness-weaver. The Python SDK that talks to the
+#    sandbox — `k8s-agent-sandbox` on PyPI — is already pinned in
+#    pyproject.toml at >=0.4,<0.5, so this single command gets both.
 pip install -e ".[dev]"
 
 # 2. Make sure your cluster is up and `kubectl` is pointed at it.
 #    Docker Desktop's Kubernetes is fine; so is Kind, minikube, GKE.
 kubectl cluster-info
 
-# 3. Install the agent-sandbox controller + python SandboxTemplate.
+# 3. Install the agent-sandbox controller (v0.4.5 release artifact)
+#    and the bundled `python` SandboxTemplate.
 make install-sandbox          # uses the current kubectl context
                               # set NAMESPACE=harness if you don't want 'default'
 
@@ -152,6 +154,14 @@ harness-weaver run examples/tasks/analytical-runtime-rating.json \
     --model claude-haiku-4-5-20251001 \
     --use-k8s
 ```
+
+The script applies the official release artifact from
+[`kubernetes-sigs/agent-sandbox`][k8s-as] —
+`https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v0.4.5/manifest.yaml`
+— not a snapshot pulled from `main`. Bump `CONTROLLER_VERSION` to a
+different tag if you want to track a newer release; keep it
+matched to the `k8s-agent-sandbox` floor in `pyproject.toml` to
+avoid client/server skew.
 
 If you don't have a cluster yet, `make kind-up` brings one up locally
 (Kind + Docker) and runs `install-sandbox` for you. `make kind-down`

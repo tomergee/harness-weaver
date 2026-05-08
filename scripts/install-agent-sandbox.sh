@@ -20,7 +20,11 @@
 #
 # Environment overrides:
 #   NAMESPACE            target namespace for the SandboxTemplate (default 'default')
-#   CONTROLLER_VERSION   git ref / tag of kubernetes-sigs/agent-sandbox to install (default 'main')
+#   CONTROLLER_VERSION   release tag of kubernetes-sigs/agent-sandbox (default
+#                        v0.4.5 — kept in lockstep with the k8s-agent-sandbox
+#                        Python SDK pinned in pyproject.toml at >=0.4,<0.5).
+#                        See https://github.com/kubernetes-sigs/agent-sandbox/releases
+#                        for available tags.
 #   SKIP_CONFIRM         set to 1 to skip the context confirmation
 #
 # Usage:
@@ -31,9 +35,12 @@
 set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-default}"
-CONTROLLER_VERSION="${CONTROLLER_VERSION:-main}"
+CONTROLLER_VERSION="${CONTROLLER_VERSION:-v0.4.5}"
 SKIP_CONFIRM="${SKIP_CONFIRM:-0}"
-CONTROLLER_MANIFEST_URL="https://raw.githubusercontent.com/kubernetes-sigs/agent-sandbox/${CONTROLLER_VERSION}/manifests/install.yaml"
+# Official release artifact — produced by the upstream release pipeline,
+# not a raw file pulled from a branch. See README.md of
+# kubernetes-sigs/agent-sandbox for the documented install command.
+CONTROLLER_MANIFEST_URL="https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${CONTROLLER_VERSION}/manifest.yaml"
 TEMPLATE_PATH="$(cd "$(dirname "$0")/.." && pwd)/scripts/python-sandbox-template.yaml"
 
 require() {

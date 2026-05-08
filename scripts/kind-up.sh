@@ -14,8 +14,12 @@ set -euo pipefail
 
 CLUSTER_NAME="${CLUSTER_NAME:-harness-weaver}"
 NAMESPACE="${NAMESPACE:-default}"
-CONTROLLER_VERSION="${CONTROLLER_VERSION:-main}"
-CONTROLLER_MANIFEST_URL="https://raw.githubusercontent.com/kubernetes-sigs/agent-sandbox/${CONTROLLER_VERSION}/manifests/install.yaml"
+CONTROLLER_VERSION="${CONTROLLER_VERSION:-v0.4.5}"
+# Official release artifact (kept in lockstep with the k8s-agent-sandbox
+# Python SDK pinned in pyproject.toml at >=0.4,<0.5). Override
+# CONTROLLER_VERSION to pick a different tag from
+# https://github.com/kubernetes-sigs/agent-sandbox/releases.
+CONTROLLER_MANIFEST_URL="https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${CONTROLLER_VERSION}/manifest.yaml"
 TEMPLATE_PATH="$(cd "$(dirname "$0")/.." && pwd)/scripts/python-sandbox-template.yaml"
 
 require() {
