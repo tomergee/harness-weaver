@@ -212,7 +212,8 @@ Five components, three seams:
 - **Recorder** translates SDK hook events into our internal `Trajectory`
   model. The trajectory is the source of truth for eval.
 - **Judge** uses `inspect-ai` to run LLM-as-judge over pairs of trajectories,
-  calibrated against a small human-rated set.
+  calibrated against a small human-rated set. See
+  [ADR-0005](docs/adr/0005-judge-design.md) for the rubric and design.
 
 See [`docs/adr/`](docs/adr/) for design decision records.
 
