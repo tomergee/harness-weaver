@@ -1,17 +1,18 @@
-.PHONY: help install fmt lint typecheck test test-cov check clean kind-up kind-down
+.PHONY: help install fmt lint typecheck test test-cov check clean kind-up kind-down install-sandbox
 
 help:
 	@echo "Targets:"
-	@echo "  install     install package and dev deps; install pre-commit hooks"
-	@echo "  fmt         format code with ruff"
-	@echo "  lint        lint code with ruff"
-	@echo "  typecheck   run mypy --strict"
-	@echo "  test        run pytest"
-	@echo "  test-cov    run pytest with coverage report"
-	@echo "  check       fmt + lint + typecheck + test (the gate before opening a PR)"
-	@echo "  clean       remove build artifacts and caches"
-	@echo "  kind-up     bring up a local Kind cluster + agent-sandbox controller + python template"
-	@echo "  kind-down   tear it back down"
+	@echo "  install          install package and dev deps; install pre-commit hooks"
+	@echo "  fmt              format code with ruff"
+	@echo "  lint             lint code with ruff"
+	@echo "  typecheck        run mypy --strict"
+	@echo "  test             run pytest"
+	@echo "  test-cov         run pytest with coverage report"
+	@echo "  check            fmt + lint + typecheck + test (the gate before opening a PR)"
+	@echo "  clean            remove build artifacts and caches"
+	@echo "  install-sandbox  install agent-sandbox controller + python template into the current kubectl context"
+	@echo "  kind-up          bring up a fresh Kind cluster AND install the controller + template"
+	@echo "  kind-down        tear the local Kind cluster down"
 
 install:
 	pip install -e ".[dev]"
@@ -41,6 +42,9 @@ clean:
 	rm -rf .mypy_cache .ruff_cache .pytest_cache htmlcov coverage.xml .coverage
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type d -name "*.egg-info" -exec rm -rf {} +
+
+install-sandbox:
+	./scripts/install-agent-sandbox.sh
 
 kind-up:
 	./scripts/kind-up.sh

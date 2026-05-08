@@ -123,6 +123,42 @@ For a guided tour of how to use the harness — task format,
 configurations, CLI reference, extending the tool surface, common
 gotchas — see the **[user manual in `docs/manual/`](docs/manual/README.md)**.
 
+### Running with the Kubernetes sandbox
+
+`run_python` runs through whatever `ExecutionBackend` is wired in.
+The default `LocalSubprocessBackend` runs snippets as a child process
+on the host (no real isolation). For real isolation —
+[`kubernetes-sigs/agent-sandbox`][k8s-as] provisioning a sandbox pod
+per Harness — install the controller into your cluster and pass
+`--use-k8s`:
+
+```bash
+# 1. Install harness-weaver and the k8s-agent-sandbox Python SDK
+#    (already pinned in pyproject.toml; no extra step needed).
+pip install -e ".[dev]"
+
+# 2. Make sure your cluster is up and `kubectl` is pointed at it.
+#    Docker Desktop's Kubernetes is fine; so is Kind, minikube, GKE.
+kubectl cluster-info
+
+# 3. Install the agent-sandbox controller + python SandboxTemplate.
+make install-sandbox          # uses the current kubectl context
+                              # set NAMESPACE=harness if you don't want 'default'
+
+# 4. Run a task with the K8s backend.
+export ANTHROPIC_API_KEY=sk-ant-...
+harness-weaver run examples/tasks/analytical-runtime-rating.json \
+    --config single-agent-with-sandbox \
+    --model claude-haiku-4-5-20251001 \
+    --use-k8s
+```
+
+If you don't have a cluster yet, `make kind-up` brings one up locally
+(Kind + Docker) and runs `install-sandbox` for you. `make kind-down`
+tears it back down. See
+[`docs/manual/k8s-sandbox.md`](docs/manual/k8s-sandbox.md) for the
+full walk-through, troubleshooting, and programmatic use.
+
 ---
 
 ## Architecture

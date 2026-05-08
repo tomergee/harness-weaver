@@ -8,36 +8,81 @@ Harness. Two backends ship:
 | `LocalSubprocessBackend` (default) | env scrub + fresh tmp dir | none | dev, CI, anywhere you trust the snippet enough to run as your user |
 | `AgentSandboxBackend` | full pod, network policy, resource limits | one cluster, one CRD | demos, untrusted snippets, anywhere "real isolation" matters |
 
-This page walks through getting the K8s backend running on a Kind
-cluster — the simplest path that's still real Kubernetes. Production
-clusters work the same way; only the controller-install step differs.
+This page covers two paths to a working K8s backend: using a cluster
+you already have (Docker Desktop's Kubernetes, GKE, EKS, etc.), and
+spinning a throwaway Kind cluster from scratch.
 
 ## Prerequisites
 
-* **Docker** (with the daemon running) — Kind runs Kubernetes nodes as
-  Docker containers.
-* **Kind** ≥ 0.20 — [install instructions](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 * **kubectl** — [install instructions](https://kubernetes.io/docs/tasks/tools/)
-* The harness installed locally (`pip install -e ".[dev]"`).
+* **A running Kubernetes cluster.** Anything `kubectl cluster-info`
+  can reach works:
+  * Docker Desktop's built-in Kubernetes
+  * Kind (with Docker)
+  * minikube
+  * any managed cluster (GKE, EKS, AKS)
+* The harness installed locally:
 
-## One-command bring-up
+  ```bash
+  pip install -e ".[dev]"
+  ```
+
+  The `k8s-agent-sandbox` Python SDK is pinned in `pyproject.toml`,
+  so the install command above pulls it in automatically.
+
+## Path A — you already have a cluster
+
+The common case if you're using Docker Desktop's Kubernetes (or any
+other already-running cluster). One command installs the controller
+plus the `python` `SandboxTemplate` into your current `kubectl`
+context:
+
+```bash
+make install-sandbox
+```
+
+That runs [`scripts/install-agent-sandbox.sh`](../../scripts/install-agent-sandbox.sh):
+
+1. Verifies `kubectl` is on `PATH` and can reach the cluster.
+2. Shows you the context name and asks for confirmation (set
+   `SKIP_CONFIRM=1` to skip in CI).
+3. Applies the upstream [`kubernetes-sigs/agent-sandbox`][k8s-as]
+   controller manifest — installs the `SandboxTemplate` and `Sandbox`
+   CRDs plus the controller `Deployment` in `agent-sandbox-system`.
+4. Waits up to 3 minutes for the controller to become Ready.
+5. Applies the bundled
+   [`scripts/python-sandbox-template.yaml`](../../scripts/python-sandbox-template.yaml)
+   to your target namespace (default: `default`) — a slim
+   `python:3.11-slim` template the harness instantiates when you ask
+   for `template="python"`.
+
+Idempotent: re-running is safe.
+
+Common overrides (set as env vars before `make install-sandbox`):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `NAMESPACE` | `default` | Target namespace for the `SandboxTemplate`. Created if missing. |
+| `CONTROLLER_VERSION` | `main` | Git ref / tag of `kubernetes-sigs/agent-sandbox` whose `manifests/install.yaml` to apply. |
+| `SKIP_CONFIRM` | (unset) | Set to `1` to skip the "is this the right context?" prompt. |
+
+[k8s-as]: https://github.com/kubernetes-sigs/agent-sandbox
+
+## Path B — bring up a fresh Kind cluster
+
+If you don't have a cluster, want a throwaway one, or want everything
+torn down cleanly afterwards:
 
 ```bash
 make kind-up
 ```
 
-That's it. The script (`scripts/kind-up.sh`):
+Runs [`scripts/kind-up.sh`](../../scripts/kind-up.sh): same five
+steps as Path A, plus a `kind create cluster --name harness-weaver`
+at the top. Tear down with `make kind-down`.
 
-1. Creates a Kind cluster named `harness-weaver`.
-2. Applies the upstream
-   [`kubernetes-sigs/agent-sandbox`](https://github.com/kubernetes-sigs/agent-sandbox)
-   controller manifest, which installs the `SandboxTemplate` and
-   `Sandbox` CRDs plus the controller deployment in
-   `agent-sandbox-system`.
-3. Waits for the controller to become ready.
-4. Applies the bundled `scripts/python-sandbox-template.yaml` to your
-   `default` namespace — a slim `python:3.11-slim` template the
-   harness instantiates when you ask for `template="python"`.
+Requires Docker (with the daemon running) and `kind` ≥ 0.20 on
+`PATH` ([install instructions](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)).
 
 Idempotent: re-running on top of an existing cluster is a no-op.
 
@@ -79,10 +124,26 @@ Deletes the Kind cluster (and everything inside it). Idempotent.
 
 ## Troubleshooting
 
-### `failed to connect to the docker API`
+### `kubectl can't reach the cluster for context '...'`
+
+`make install-sandbox` checks `kubectl cluster-info` first. If it
+fails, your cluster isn't running or `kubectl` is pointed at the
+wrong context. Diagnose:
+
+```bash
+kubectl config current-context     # which context is selected?
+kubectl config get-contexts        # what's available?
+kubectl cluster-info               # what does the cluster say?
+```
+
+For Docker Desktop: open Docker Desktop → Settings → Kubernetes,
+make sure "Enable Kubernetes" is checked, wait for the green dot.
+
+### `failed to connect to the docker API` (when running `make kind-up`)
 
 Docker daemon isn't running. Start Docker Desktop (or `systemctl
-start docker` on Linux) and re-run `make kind-up`.
+start docker` on Linux) and re-run `make kind-up`. This error doesn't
+apply to `make install-sandbox` — it never touches Docker directly.
 
 ### Controller doesn't become ready in 3 minutes
 
