@@ -77,6 +77,22 @@ Common overrides (set as env vars before `make install-sandbox`):
 | `CONTROLLER_VERSION` | `v0.4.5` | Release tag of `kubernetes-sigs/agent-sandbox` to install. The script downloads `releases/download/${CONTROLLER_VERSION}/manifest.yaml`. Keep it within the same minor as `k8s-agent-sandbox` in `pyproject.toml` (currently `>=0.4,<0.5`). |
 | `SKIP_CONFIRM` | (unset) | Set to `1` to skip the "is this the right context?" prompt. |
 
+> **Namespace coordination.** If you install to a namespace other than
+> `default`, you **must** pass the same value to the harness at run
+> time via `--k8s-namespace`. The backend's default is `default`, and a
+> mismatch surfaces as `SandboxTemplate "python" not found`. Example:
+>
+> ```bash
+> # 1. Install into a namespace called 'harness':
+> NAMESPACE=harness make install-sandbox
+>
+> # 2. Run with the same namespace:
+> harness-weaver run examples/tasks/analytical-runtime-rating.json \
+>     --config single-agent-with-sandbox \
+>     --model claude-haiku-4-5-20251001 \
+>     --use-k8s --k8s-namespace harness
+> ```
+
 [k8s-as]: https://github.com/kubernetes-sigs/agent-sandbox
 
 ## Path B — bring up a fresh Kind cluster
@@ -114,6 +130,11 @@ the run (see [ADR-0003](../adr/0003-sandbox-lifecycle.md) for why).
 On a Kind cluster, expect the first call to take 30-60 seconds while
 the pod schedules and the image pulls; subsequent calls in the same
 run are a few hundred milliseconds.
+
+If you installed the template to a non-default namespace, add
+`--k8s-namespace <name>` (matching the `NAMESPACE` you used at
+install time). Without it the backend looks in `default` and fails
+with `SandboxTemplate "python" not found`.
 
 The `--use-k8s` flag also works on `compare` and `eval`:
 
