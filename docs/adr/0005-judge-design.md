@@ -65,8 +65,8 @@ Before the model sees the trajectories, the judge runs
 * per-side event count, tool-call count, tool-error count
 * wall-clock duration
 * presence and length of a final answer
-* failure-mode tags from :mod:`.classifier` (early-exit, runaway
-  loop, tool-error-cascade, no-final-answer, etc.)
+* failure-mode tags from :mod:`.classifier` (``HALLUCINATED_TOOL``,
+  ``INFINITE_LOOP``, ``OFF_TASK``, ``REFUSAL``, ``COST_BLOWUP``)
 * success-criteria pass/fail when the `Task` carries them
 
 That report is rendered to markdown via
@@ -174,6 +174,6 @@ without an API key).
   :class:`StructuralReport`, :func:`render_markdown`.
 * :mod:`harness_weaver.judge.classifier` — failure-mode tagging.
 * `inspect_ai.model.get_model`, `ChatMessageSystem`, `ChatMessageUser`.
-* README §"Judge design" — the evaluation philosophy this ADR formalizes.
+* README §"Eval pipeline" — the evaluation philosophy this ADR formalizes.
 * ADR-0002 — orchestrator-worker via SDK subagents (the topology the
   judge evaluates).
