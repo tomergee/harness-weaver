@@ -46,13 +46,31 @@ Requires Python 3.11+. No Kubernetes needed for the default path. An
 `ANTHROPIC_API_KEY` is needed to run against a live model; the test
 surface and the bundled example trajectories don't require one.
 
+**Recommended:** bootstrap a dedicated virtualenv and dev install (avoids
+clashing with other packages on your user `pip`, and satisfies the
+`anthropic` version inspect-ai needs for the LLM judge):
+
 ```bash
 git clone https://github.com/tomergee/harness-weaver
 cd harness-weaver
-pip install -e ".[dev]"
-make check                                 # 149 tests, ~94% coverage
+python scripts/setup_dev.py
+```
 
-harness-weaver list-configs                # see the three built-in configurations
+Then activate `.venv` and run the quality gate (`make check`, or the
+`python -m ruff …` sequence under [Windows and WSL](#windows-and-wsl) if
+`make` is unavailable).
+
+Equivalent manual install:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1 (PowerShell)
+pip install -U pip
+pip install -e ".[dev]"
+pre-commit install            # optional; same as Makefile `install` target
+make check                    # full gate
+
+harness-weaver list-configs   # see the three built-in configurations
 ```
 
 ### Windows and WSL
@@ -70,10 +88,8 @@ In **WSL**, `make` is usually available, but dev tools (`ruff`, `mypy`, `pytest`
 
 ```bash
 cd harness-weaver
-python3 -m venv .venv
+python3 scripts/setup_dev.py
 source .venv/bin/activate
-pip install -U pip
-pip install -e ".[dev]"
 make check
 ```
 
