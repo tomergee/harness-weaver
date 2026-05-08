@@ -55,10 +55,47 @@ make check                                 # 149 tests, ~94% coverage
 harness-weaver list-configs                # see the three built-in configurations
 ```
 
-### Running against the live model
+### Windows and WSL
+
+On Windows, **GNU Make may not be in `PATH`** in PowerShell. You can run the same steps as `make check` with:
+
+```powershell
+python -m ruff format src tests
+python -m ruff check src tests
+python -m mypy src
+python -m pytest
+```
+
+In **WSL**, `make` is usually available, but dev tools (`ruff`, `mypy`, `pytest`) must be installed **inside the Linux environment** (they are not shared with a Windows `pip install`). From your clone:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+cd harness-weaver
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -e ".[dev]"
+make check
+```
+
+If the repo lives on a Windows drive (for example under `/mnt/c/...` or `/mnt/d/...`), that works; a clone under your Linux home directory (for example `~/src/harness-weaver`) can be faster and more reliable for file I/O. To translate a Windows path when scripting from PowerShell:
+
+```powershell
+wsl wslpath "D:\path\to\harness-weaver"
+```
+
+### Running against the live model
+
+Put secrets in a local `.env` (not committed) or export in the shell. In
+**bash**, loading `.env` and exporting every assignment for child
+processes is:
+
+```bash
+set -a; source .env; set +a
+```
+
+Alternatively: `export ANTHROPIC_API_KEY=sk-ant-...`
+
+```bash
 # Single-agent run with Haiku, the cheapest credible model:
 harness-weaver run examples/tasks/discovery-mood-tense.json \
     --config single-agent-basic \
