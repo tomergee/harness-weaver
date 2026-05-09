@@ -37,6 +37,11 @@ class TestBuiltins:
         assert "run_python" not in SINGLE_AGENT_BASIC.allowed_tools
         assert "run_python" in SINGLE_AGENT_WITH_SANDBOX.allowed_tools
 
+    def test_multi_agent_discovery_includes_run_python(self) -> None:
+        agents = {a.role_name: a for a in MULTI_AGENT_DISCOVERY_EXPLAINER.agents}
+        assert "run_python" in agents["discovery"].allowed_tools
+        assert "run_python" not in agents["explainer"].allowed_tools
+
     def test_multi_agent_has_two_workers(self) -> None:
         assert MULTI_AGENT_DISCOVERY_EXPLAINER.is_multi_agent
         roles = [a.role_name for a in MULTI_AGENT_DISCOVERY_EXPLAINER.agents]

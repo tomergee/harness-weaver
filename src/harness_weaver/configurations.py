@@ -143,7 +143,7 @@ SINGLE_AGENT_WITH_SANDBOX = Configuration(
 MULTI_AGENT_DISCOVERY_EXPLAINER = Configuration(
     name="multi-agent-discovery-explainer",
     description=(
-        "Orchestrator delegates discovery to a Discovery worker (full catalog access) "
+        "Orchestrator delegates discovery to a Discovery worker (catalog + sandbox) "
         "and presentation to an Explainer worker (metadata only). Tests whether splitting "
         "the work across specialist workers improves recommendation quality."
     ),
@@ -160,10 +160,11 @@ MULTI_AGENT_DISCOVERY_EXPLAINER = Configuration(
             system_prompt=(
                 "You are Discovery. Given a recommendation request, find a small set of "
                 "candidate titles that fit the user's constraints. Use search_titles, "
-                "get_metadata, and user_history. Return candidates as a JSON list of "
-                "movie ids — no prose."
+                "get_metadata, user_history, and run_python. For analytical filtering or "
+                "ranking, prefer run_python over manual mental math. Return candidates as "
+                "a JSON list of movie ids — no prose."
             ),
-            allowed_tools=("search_titles", "get_metadata", "user_history"),
+            allowed_tools=("search_titles", "get_metadata", "user_history", "run_python"),
         ),
         AgentDefinition(
             role_name="explainer",
