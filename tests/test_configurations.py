@@ -121,3 +121,54 @@ class TestRoleNameValidation:
                     ),
                 ),
             )
+
+
+class TestRunPythonDetection:
+    """The ``uses_run_python`` / ``all_allowed_tools`` properties drive
+    the K8s no-op warning. Built-ins exercise every shape we care about.
+    """
+
+    def test_single_agent_basic_does_not_use_run_python(self) -> None:
+        assert SINGLE_AGENT_BASIC.uses_run_python is False
+        assert "run_python" not in SINGLE_AGENT_BASIC.all_allowed_tools
+
+    def test_single_agent_with_sandbox_uses_run_python(self) -> None:
+        assert SINGLE_AGENT_WITH_SANDBOX.uses_run_python is True
+        assert "run_python" in SINGLE_AGENT_WITH_SANDBOX.all_allowed_tools
+
+    def test_multi_agent_discovery_explainer_uses_run_python_via_discovery(self) -> None:
+        # The orchestrator's allow-list is empty (it only delegates),
+        # but the discovery worker has run_python. ``uses_run_python``
+        # walks the union of orchestrator + workers.
+        assert "run_python" not in MULTI_AGENT_DISCOVERY_EXPLAINER.allowed_tools
+        assert MULTI_AGENT_DISCOVERY_EXPLAINER.uses_run_python is True
+        assert "run_python" in MULTI_AGENT_DISCOVERY_EXPLAINER.all_allowed_tools
+
+    def test_all_allowed_tools_unions_orchestrator_and_workers(self) -> None:
+        cfg = Configuration(
+            name="custom",
+            description="x",
+            system_prompt="x",
+            allowed_tools=(),
+            agents=(
+                AgentDefinition(
+                    role_name="discovery",
+                    system_prompt="x",
+                    allowed_tools=("search_titles", "run_python"),
+                ),
+                AgentDefinition(
+                    role_name="explainer",
+                    system_prompt="x",
+                    allowed_tools=("get_metadata",),
+                ),
+            ),
+        )
+        assert cfg.all_allowed_tools == frozenset({"search_titles", "run_python", "get_metadata"})
+        assert cfg.uses_run_python is True
+
+    def test_all_allowed_tools_orchestrator_only_run_python(self) -> None:
+        # Orchestrator-only path — no workers, run_python on the
+        # top-level allowed_tools. SINGLE_AGENT_WITH_SANDBOX is exactly
+        # this shape; this test pins the property's behaviour.
+        assert "run_python" in SINGLE_AGENT_WITH_SANDBOX.allowed_tools
+        assert SINGLE_AGENT_WITH_SANDBOX.uses_run_python is True

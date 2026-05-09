@@ -316,6 +316,30 @@ def _config_detail(cfg: Configuration) -> str:
     return f"tools: {tool_summary} • model: {model} • {agent_summary}"
 
 
+def _build_harness_detail(use_k8s: bool, *configs: Configuration) -> str:
+    """Detail string for the build-harness step.
+
+    Surfaces whether the chosen execution backend will *actually* be
+    exercised. ``AgentSandboxBackend`` is lazy: it provisions a pod the
+    first time ``run_python`` runs. A configuration whose agents don't
+    expose ``run_python`` makes ``--use-k8s`` a silent no-op, which is
+    surprising. The job page now says so explicitly.
+    """
+    if not use_k8s:
+        return "backend: LocalSubprocessBackend"
+    if any(c.uses_run_python for c in configs):
+        return (
+            "backend: AgentSandboxBackend (k8s) — pod will be provisioned on the "
+            "first run_python call"
+        )
+    names = ", ".join(c.name for c in configs)
+    return (
+        f"backend: AgentSandboxBackend (k8s) — but no agent in {names} exposes "
+        "run_python, so no sandbox pod will be provisioned (the flag is a no-op "
+        "for this configuration; pick single-agent-with-sandbox to actually exercise it)"
+    )
+
+
 @contextmanager
 def _runs_output(runs_dir: Path) -> Iterator[Path]:
     runs_dir.mkdir(parents=True, exist_ok=True)
@@ -344,7 +368,7 @@ def _do_run(
     job.emit(
         "build-harness",
         "done",
-        f"backend: {'AgentSandboxBackend (k8s)' if p.get('use_k8s') else 'LocalSubprocessBackend'}",
+        _build_harness_detail(bool(p.get("use_k8s")), cfg),
     )
 
     with factory(
@@ -392,7 +416,8 @@ def _do_compare(
     job.emit("resolve-configs", "done", f"A: {cfg_a.name} • B: {cfg_b.name}")
 
     job.emit("build-harness", "running")
-    job.emit("build-harness", "done", "single Harness, reused across both legs")
+    detail = _build_harness_detail(bool(p.get("use_k8s")), cfg_a, cfg_b)
+    job.emit("build-harness", "done", f"{detail} • single Harness, reused across both legs")
 
     trajs: list[Trajectory] = []
     with factory(
@@ -465,7 +490,8 @@ def _do_eval(
     job.emit("resolve-config", "done", _config_detail(cfg))
 
     job.emit("build-harness", "running")
-    job.emit("build-harness", "done", "single Harness, reused across all pack tasks")
+    detail = _build_harness_detail(bool(p.get("use_k8s")), cfg)
+    job.emit("build-harness", "done", f"{detail} • single Harness, reused across all pack tasks")
 
     trajs: list[Trajectory] = []
     with factory(
