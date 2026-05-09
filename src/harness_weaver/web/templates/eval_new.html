@@ -8,47 +8,59 @@
 {% endif %}
 
 <p class="warning">
-  Submitting runs the configuration over every task in the pack — expect
-  the browser to block for several minutes on real packs. The page will
-  redirect to the markdown summary when done.
+  Submitting hands the job to the worker thread and redirects to
+  <code>/jobs/{id}</code>. The job runs one SDK call per task in the
+  pack, then aggregates a markdown summary. The job page shows a step
+  per task so you can watch the pack walk through.
 </p>
 
-<form method="post" action="/eval/new" class="run-form">
-  <label>
-    Task pack
-    <select name="pack" required>
-      {% for p in packs %}
-        <option value="{{ p }}">{{ p }}</option>
-      {% endfor %}
-    </select>
-  </label>
-
-  <label>
-    Configuration
-    <select name="config" required>
-      {% for c in configs %}
-        <option value="{{ c.name }}">{{ c.name }}</option>
-      {% endfor %}
-    </select>
-  </label>
-
-  <label>
-    Model override (optional)
-    <input type="text" name="model" placeholder="claude-haiku-4-5-20251001">
-  </label>
-
-  <fieldset>
-    <legend>Execution backend</legend>
-    <label class="inline">
-      <input type="checkbox" name="use_k8s" value="true">
-      Use Kubernetes sandbox
-    </label>
+<div class="form-grid">
+  <form method="post" action="/eval/new" class="run-form" id="run-form">
     <label>
-      K8s namespace
-      <input type="text" name="k8s_namespace" value="default">
+      Task pack
+      <select name="pack" required>
+        {% for p in packs %}
+          <option value="{{ p }}">{{ p }}</option>
+        {% endfor %}
+      </select>
     </label>
-  </fieldset>
 
-  <button type="submit">Run pack</button>
-</form>
+    <label>
+      Configuration
+      <select name="config" id="config-picker" required>
+        {% for c in configs %}
+          <option value="{{ c.name }}">{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>
+      Model override (optional)
+      <input type="text" name="model" placeholder="claude-haiku-4-5-20251001">
+    </label>
+
+    <fieldset>
+      <legend>Execution backend</legend>
+      <label class="inline">
+        <input type="checkbox" name="use_k8s" value="true">
+        Use Kubernetes sandbox
+      </label>
+      <label>
+        K8s namespace
+        <input type="text" name="k8s_namespace" value="default">
+      </label>
+    </fieldset>
+
+    <button type="submit">Run pack</button>
+  </form>
+
+  <aside class="config-explainer" id="config-explainer">
+    <h2>What this configuration uses</h2>
+    <p class="meta">Updates when you pick a different option.</p>
+    <div class="explainer-body" id="config-explainer-body">…</div>
+  </aside>
+</div>
+
+<script type="application/json" id="config-summaries-data">{{ config_summaries|tojson }}</script>
+<script src="{{ url_for('static', path='form.js') }}"></script>
 {% endblock %}

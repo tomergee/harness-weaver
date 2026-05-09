@@ -178,29 +178,65 @@ def test_eval_new_form_lists_packs(client: TestClient) -> None:
 # --- POST /runs/new ---------------------------------------------------------
 
 
-def test_post_runs_new_writes_trajectory_and_redirects(
+def _wait_for_job_done(client: TestClient, job_id: str, timeout_s: float = 5.0) -> dict:
+    """Poll /jobs/{id}.json until the job reaches a terminal status.
+
+    Form POSTs now enqueue jobs on a worker thread (see
+    :mod:`harness_weaver.web.jobs`) and 303 to /jobs/{id}. Tests use
+    this helper to wait for completion before asserting on artifacts.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        response = client.get(f"/jobs/{job_id}.json")
+        assert response.status_code == 200, response.text
+        snap = response.json()
+        if snap["status"] in {"done", "error"}:
+            return snap
+        time.sleep(0.05)
+    raise AssertionError(f"job {job_id} did not finish within {timeout_s}s")
+
+
+def _submit_and_wait(client: TestClient, url: str, data: dict, timeout_s: float = 10.0) -> dict:
+    response = client.post(url, data=data, follow_redirects=False)
+    assert response.status_code == 303, (response.status_code, response.text)
+    location = response.headers["location"]
+    assert location.startswith("/jobs/"), f"expected job redirect, got {location}"
+    job_id = location.removeprefix("/jobs/")
+    return _wait_for_job_done(client, job_id, timeout_s=timeout_s)
+
+
+def test_post_runs_new_enqueues_job_and_writes_trajectory(
     client: TestClient, tmp_runs_dir: Path, fake_factory: list[_FakeHarnessCtx]
 ) -> None:
-    """POST runs the harness via the injected fake, persists the trajectory,
-    and redirects to the trajectory page. The fake context manager must
-    have entered AND exited (lifecycle = no leaked backend)."""
-    response = client.post(
+    """POST enqueues a job, redirects to /jobs/{id}; the worker walks
+    through phases (load-task → resolve-config → build-harness →
+    sdk-call → write-output) and writes the trajectory.
+
+    The fake harness context must have entered AND exited (lifecycle
+    = no leaked backend) — same invariant the blocking flow had.
+    """
+    snap = _submit_and_wait(
+        client,
         "/runs/new",
-        data={
+        {
             "task": "examples/tasks/discovery-mood-tense.json",
             "config": "single-agent-basic",
             "model": "",
             "k8s_namespace": "default",
         },
-        follow_redirects=False,
     )
 
-    assert response.status_code == 303
-    assert response.headers["location"].startswith("/trajectories/")
+    assert snap["status"] == "done", snap
+    assert snap["redirect_url"].startswith("/trajectories/")
+    # All planned steps should be in 'done' state.
+    assert all(s["status"] == "done" for s in snap["steps"]), [
+        (s["id"], s["status"]) for s in snap["steps"]
+    ]
 
     written = list(tmp_runs_dir.glob("*.json"))
     assert len(written) == 1
-
     data = json.loads(written[0].read_text(encoding="utf-8"))
     assert data["task_id"] == "discovery-mood-tense"
     assert data["configuration_name"] == "single-agent-basic"
@@ -234,9 +270,10 @@ def test_post_runs_new_rejects_path_traversal(client: TestClient) -> None:
 def test_post_compare_new_writes_report(
     client: TestClient, tmp_runs_dir: Path, fake_factory: list[_FakeHarnessCtx]
 ) -> None:
-    response = client.post(
+    snap = _submit_and_wait(
+        client,
         "/compare/new",
-        data={
+        {
             # Same config name on both legs — exercises the per-leg
             # filename suffix (PR #11 review #3). Without the suffix the
             # second trajectory would overwrite the first.
@@ -247,12 +284,10 @@ def test_post_compare_new_writes_report(
             "judge_model": "",
             "k8s_namespace": "default",
         },
-        follow_redirects=False,
     )
 
-    assert response.status_code == 303
-    # The redirect should land on the report.
-    assert response.headers["location"].startswith("/reports/")
+    assert snap["status"] == "done", snap
+    assert snap["redirect_url"].startswith("/reports/")
 
     # Two trajectories + one report written. With the .0/.1 suffix even
     # same-config compare keeps both legs on disk.
@@ -298,18 +333,19 @@ def test_post_eval_new_writes_summary(
         pytest.skip("No bundled task pack to exercise eval against.")
 
     pack_file = next(pack_path.glob("*.json"))
-    response = client.post(
+    snap = _submit_and_wait(
+        client,
         "/eval/new",
-        data={
+        {
             "pack": str(pack_file.relative_to(repo_root)),
             "config": "single-agent-basic",
             "k8s_namespace": "default",
         },
-        follow_redirects=False,
+        timeout_s=20.0,
     )
 
-    assert response.status_code == 303
-    assert response.headers["location"].startswith("/reports/")
+    assert snap["status"] == "done", snap
+    assert snap["redirect_url"].startswith("/reports/")
 
     md_files = list(tmp_runs_dir.glob("*.eval.md"))
     assert len(md_files) == 1
@@ -442,24 +478,136 @@ def test_post_runs_new_uses_model_override(
 ) -> None:
     """A model override flows through to the configuration the harness sees."""
     del fake_factory  # not asserting on the recorder here
-    response = client.post(
+    snap = _submit_and_wait(
+        client,
         "/runs/new",
-        data={
+        {
             "task": "examples/tasks/discovery-mood-tense.json",
             "config": "single-agent-basic",
             "model": "claude-haiku-4-5-20251001",
             "k8s_namespace": "default",
         },
-        follow_redirects=False,
     )
-
-    assert response.status_code == 303
+    assert snap["status"] == "done"
     written = next(tmp_runs_dir.glob("*.json"))
     data = json.loads(written.read_text(encoding="utf-8"))
     # The Trajectory carries the configuration_name; we just check the
     # write happened. Fuller wiring is exercised by the CLI tests; the
     # web layer's job is just to forward the override.
     assert data["task_id"] == "discovery-mood-tense"
+
+
+# --- Job page + SSE --------------------------------------------------------
+
+
+def test_job_page_renders_steps_and_metadata(
+    client: TestClient, fake_factory: list[_FakeHarnessCtx]
+) -> None:
+    """The /jobs/{id} page shows the job title, the planned step list,
+    and an empty event log placeholder before the worker has finished.
+    """
+    del fake_factory
+    response = client.post(
+        "/runs/new",
+        data={
+            "task": "examples/tasks/discovery-mood-tense.json",
+            "config": "single-agent-basic",
+            "model": "",
+            "k8s_namespace": "default",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    job_id = response.headers["location"].removeprefix("/jobs/")
+
+    page = client.get(f"/jobs/{job_id}")
+    assert page.status_code == 200
+    # Title + planned steps + timer + log container all rendered.
+    assert "discovery-mood-tense" in page.text
+    assert "Run agent loop" in page.text
+    assert "Persist trajectory" in page.text
+    assert 'id="job-timer"' in page.text
+    assert 'id="event-log"' in page.text
+
+
+def test_job_json_endpoint_reflects_completed_run(
+    client: TestClient, fake_factory: list[_FakeHarnessCtx]
+) -> None:
+    """The /jobs/{id}.json endpoint returns the same snapshot the SSE
+    'done' event ships, with all steps marked done."""
+    del fake_factory
+    snap = _submit_and_wait(
+        client,
+        "/runs/new",
+        {
+            "task": "examples/tasks/discovery-mood-tense.json",
+            "config": "single-agent-basic",
+            "model": "",
+            "k8s_namespace": "default",
+        },
+    )
+    assert snap["status"] == "done"
+    # Steps cover the documented run-job phases.
+    step_ids = {s["id"] for s in snap["steps"]}
+    assert step_ids == {
+        "load-task",
+        "resolve-config",
+        "build-harness",
+        "sdk-call",
+        "write-output",
+    }
+    # All steps end in 'done' status.
+    assert all(s["status"] == "done" for s in snap["steps"])
+    # Per-phase events landed in the events list, including step+detail.
+    events = snap["events"]
+    assert any(e["step"] == "sdk-call" and e["status"] == "running" for e in events)
+    assert any(e["step"] == "write-output" and e["status"] == "done" for e in events)
+
+
+def test_sse_endpoint_streams_until_done(
+    client: TestClient, fake_factory: list[_FakeHarnessCtx]
+) -> None:
+    """/jobs/{id}/events streams phase events and closes with an
+    ``event: done`` marker carrying the full snapshot."""
+    del fake_factory
+    response = client.post(
+        "/runs/new",
+        data={
+            "task": "examples/tasks/discovery-mood-tense.json",
+            "config": "single-agent-basic",
+            "model": "",
+            "k8s_namespace": "default",
+        },
+        follow_redirects=False,
+    )
+    job_id = response.headers["location"].removeprefix("/jobs/")
+
+    sse = client.get(f"/jobs/{job_id}/events")
+    assert sse.status_code == 200
+    assert sse.headers["content-type"].startswith("text/event-stream")
+    body = sse.text
+    # At least one phase event arrived as a data: line.
+    assert "data: " in body
+    # The terminal 'event: done' marker fires.
+    assert "event: done" in body
+    # The terminal payload carries the redirect URL.
+    assert "/trajectories/" in body
+
+
+def test_job_view_404_for_unknown_id(client: TestClient) -> None:
+    response = client.get("/jobs/does-not-exist")
+    assert response.status_code == 404
+
+
+def test_form_renders_config_summaries_for_sidebar(client: TestClient) -> None:
+    """Form pages embed all config summaries as JSON for the JS sidebar."""
+    response = client.get("/runs/new")
+    assert response.status_code == 200
+    assert 'id="config-summaries-data"' in response.text
+    assert 'id="config-explainer"' in response.text
+    # Embedded JSON should at minimum include each built-in config name.
+    assert "single-agent-basic" in response.text
+    assert "multi-agent-discovery-explainer" in response.text
 
 
 # Keep the import quiet for ruff if unused.

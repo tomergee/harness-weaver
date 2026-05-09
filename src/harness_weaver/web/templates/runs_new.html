@@ -8,47 +8,60 @@
 {% endif %}
 
 <p class="warning">
-  Submitting will block your browser for ~20-60 seconds while the harness
-  drives the SDK. Don't refresh — the page will redirect to the trajectory
-  when the run finishes.
+  Submitting will hand the job to a single-worker thread pool and redirect
+  you to <code>/jobs/{id}</code>, where the page updates live as the
+  harness walks through its phases (load task → resolve config →
+  build harness → call SDK → write trajectory). Final redirect to the
+  trajectory view fires automatically when the run completes.
 </p>
 
-<form method="post" action="/runs/new" class="run-form">
-  <label>
-    Task
-    <select name="task" required>
-      {% for t in tasks %}
-        <option value="{{ t }}">{{ t }}</option>
-      {% endfor %}
-    </select>
-  </label>
-
-  <label>
-    Configuration
-    <select name="config" required>
-      {% for c in configs %}
-        <option value="{{ c.name }}">{{ c.name }} — {{ c.description }}</option>
-      {% endfor %}
-    </select>
-  </label>
-
-  <label>
-    Model override (optional)
-    <input type="text" name="model" placeholder="claude-haiku-4-5-20251001">
-  </label>
-
-  <fieldset>
-    <legend>Execution backend</legend>
-    <label class="inline">
-      <input type="checkbox" name="use_k8s" value="true">
-      Use Kubernetes sandbox
-    </label>
+<div class="form-grid">
+  <form method="post" action="/runs/new" class="run-form" id="run-form">
     <label>
-      K8s namespace
-      <input type="text" name="k8s_namespace" value="default">
+      Task
+      <select name="task" required>
+        {% for t in tasks %}
+          <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
     </label>
-  </fieldset>
 
-  <button type="submit">Run</button>
-</form>
+    <label>
+      Configuration
+      <select name="config" id="config-picker" required>
+        {% for c in configs %}
+          <option value="{{ c.name }}">{{ c.name }} — {{ c.description }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>
+      Model override (optional)
+      <input type="text" name="model" placeholder="claude-haiku-4-5-20251001">
+    </label>
+
+    <fieldset>
+      <legend>Execution backend</legend>
+      <label class="inline">
+        <input type="checkbox" name="use_k8s" value="true">
+        Use Kubernetes sandbox
+      </label>
+      <label>
+        K8s namespace
+        <input type="text" name="k8s_namespace" value="default">
+      </label>
+    </fieldset>
+
+    <button type="submit">Run</button>
+  </form>
+
+  <aside class="config-explainer" id="config-explainer">
+    <h2>What this configuration uses</h2>
+    <p class="meta">Updates when you pick a different option.</p>
+    <div class="explainer-body" id="config-explainer-body">…</div>
+  </aside>
+</div>
+
+<script type="application/json" id="config-summaries-data">{{ config_summaries|tojson }}</script>
+<script src="{{ url_for('static', path='form.js') }}"></script>
 {% endblock %}
