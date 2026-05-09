@@ -157,6 +157,7 @@ def test_runs_new_form_lists_tasks_and_configs(client: TestClient) -> None:
     # The bundled discovery task is wired into examples/tasks/.
     assert "discovery-mood-tense.json" in response.text
     assert "single-agent-basic" in response.text
+    assert 'name="use_k8s" value="true" checked' in response.text
 
 
 def test_compare_new_form_renders(client: TestClient) -> None:
@@ -165,6 +166,7 @@ def test_compare_new_form_renders(client: TestClient) -> None:
     assert response.status_code == 200
     assert "Configuration A" in response.text
     assert "Configuration B" in response.text
+    assert 'name="use_k8s" value="true" checked' in response.text
 
 
 def test_eval_new_form_lists_packs(client: TestClient) -> None:
@@ -173,6 +175,7 @@ def test_eval_new_form_lists_packs(client: TestClient) -> None:
     assert response.status_code == 200
     # The bundled pack name comes from examples/packs/.
     assert ".json" in response.text
+    assert 'name="use_k8s" value="true" checked' in response.text
 
 
 # --- POST /runs/new ---------------------------------------------------------

@@ -119,7 +119,7 @@ def list_configs() -> None:
 @contextmanager
 def _build_harness(
     *,
-    use_k8s: bool = False,
+    use_k8s: bool = True,
     k8s_namespace: str = "default",
 ) -> Iterator[Harness]:
     """Yield a Harness with the appropriate execution backend.
@@ -172,16 +172,15 @@ def _resolve_config(name: str, model_override: str | None) -> "Configuration":
 
 _K8S_FLAG_HELP = (
     "Use the AgentSandboxBackend (kubernetes-sigs/agent-sandbox) for "
-    "run_python instead of LocalSubprocessBackend. Requires a "
-    "configured cluster and the 'python' SandboxTemplate installed; "
-    "see docs/manual/k8s-sandbox.md."
+    "run_python instead of LocalSubprocessBackend. Enabled by default; "
+    "pass --no-use-k8s to opt out. Requires a configured cluster and the "
+    "'python' SandboxTemplate installed; see docs/manual/k8s-sandbox.md."
 )
 
 _K8S_NAMESPACE_HELP = (
     "Kubernetes namespace the 'python' SandboxTemplate was installed "
     "into. Must match the NAMESPACE you passed to 'make install-sandbox' "
-    "(or to scripts/install-agent-sandbox.sh). Default 'default'. "
-    "Ignored unless --use-k8s is set."
+    "(or to scripts/install-agent-sandbox.sh). Default 'default'."
 )
 
 
@@ -205,7 +204,9 @@ def run(
     output_dir: Annotated[
         Path, typer.Option("--output-dir", help="Directory for trajectory output.")
     ] = Path("runs"),
-    use_k8s: Annotated[bool, typer.Option("--use-k8s", help=_K8S_FLAG_HELP)] = False,
+    use_k8s: Annotated[
+        bool, typer.Option("--use-k8s/--no-use-k8s", help=_K8S_FLAG_HELP)
+    ] = True,
     k8s_namespace: Annotated[
         str, typer.Option("--k8s-namespace", help=_K8S_NAMESPACE_HELP)
     ] = "default",
@@ -244,7 +245,9 @@ def compare(
     output_dir: Annotated[
         Path, typer.Option("--output-dir", help="Directory for comparison output.")
     ] = Path("runs"),
-    use_k8s: Annotated[bool, typer.Option("--use-k8s", help=_K8S_FLAG_HELP)] = False,
+    use_k8s: Annotated[
+        bool, typer.Option("--use-k8s/--no-use-k8s", help=_K8S_FLAG_HELP)
+    ] = True,
     k8s_namespace: Annotated[
         str, typer.Option("--k8s-namespace", help=_K8S_NAMESPACE_HELP)
     ] = "default",
@@ -313,7 +316,9 @@ def eval_(
     output_dir: Annotated[
         Path, typer.Option("--output-dir", help="Directory for evaluation output.")
     ] = Path("runs"),
-    use_k8s: Annotated[bool, typer.Option("--use-k8s", help=_K8S_FLAG_HELP)] = False,
+    use_k8s: Annotated[
+        bool, typer.Option("--use-k8s/--no-use-k8s", help=_K8S_FLAG_HELP)
+    ] = True,
     k8s_namespace: Annotated[
         str, typer.Option("--k8s-namespace", help=_K8S_NAMESPACE_HELP)
     ] = "default",

@@ -139,3 +139,24 @@ def test_build_harness_no_backend_when_local() -> None:
         # Local default: backend was constructed by Harness internally.
         # We just verify no exception and that we got a Harness back.
         assert harness is not None
+
+
+def test_build_harness_defaults_to_k8s(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default path should provision the K8s backend unless explicitly disabled."""
+    from unittest.mock import MagicMock
+
+    from harness_weaver.cli import _build_harness
+
+    backend_instance = MagicMock()
+    backend_instance.__enter__ = MagicMock(return_value=backend_instance)
+    backend_instance.__exit__ = MagicMock(return_value=False)
+
+    fake_class = MagicMock(return_value=backend_instance)
+    monkeypatch.setattr("harness_weaver.execution.AgentSandboxBackend", fake_class)
+
+    with _build_harness():
+        pass
+
+    fake_class.assert_called_once_with(namespace="default")

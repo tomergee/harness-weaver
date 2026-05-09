@@ -378,7 +378,7 @@ def create_app(
         task: str = Form(...),
         config: str = Form(...),
         model: str = Form(""),
-        use_k8s: bool = Form(False),
+        use_k8s: bool = Form(True),
         k8s_namespace: str = Form("default"),
     ) -> Any:
         if _path_under_repo(task) is None:
@@ -415,7 +415,7 @@ def create_app(
         config_b: str = Form(...),
         model: str = Form(""),
         judge_model: str = Form(""),
-        use_k8s: bool = Form(False),
+        use_k8s: bool = Form(True),
         k8s_namespace: str = Form("default"),
     ) -> Any:
         if _path_under_repo(task) is None:
@@ -452,7 +452,7 @@ def create_app(
         pack: str = Form(...),
         config: str = Form(...),
         model: str = Form(""),
-        use_k8s: bool = Form(False),
+        use_k8s: bool = Form(True),
         k8s_namespace: str = Form("default"),
     ) -> Any:
         if _path_under_repo(pack) is None:
