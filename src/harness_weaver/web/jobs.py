@@ -587,24 +587,37 @@ class JobRegistry:
                 runs_dir=self.runs_dir,
                 factory=self.factory,
             )
-        except BaseException as exc:
+        except Exception as exc:
+            # Catch ``Exception``, not ``BaseException``, so
+            # KeyboardInterrupt / SystemExit propagate to the executor's
+            # thread shutdown logic instead of being mis-recorded as a
+            # "failed" job. PR #18 review.
             tb = traceback.format_exc()
             with job._lock:
                 job.status = "error"
                 job.error = f"{type(exc).__name__}: {exc}"
                 job.finished_at = datetime.now(UTC)
             # Find the running step (if any) and mark it errored.
+            # ``str(exc).splitlines()`` can be empty for bare
+            # ``raise Exception()`` calls; fall back to the type name.
+            # PR #18 review.
+            exc_lines = str(exc).splitlines()
+            first_line = exc_lines[0] if exc_lines else type(exc).__name__
             for step in job.steps:
                 if step.status == "running":
-                    job.emit(step.id, "error", str(exc).splitlines()[0])
+                    job.emit(step.id, "error", first_line)
                     break
             # Always emit a job-level error event for the SSE stream.
-            job.events.append(JobEvent(step="__job__", status="error", detail=tb.splitlines()[-1]))
+            # Route through ``emit`` so the append happens under the
+            # lock — direct ``job.events.append`` raced with a concurrent
+            # ``snapshot()`` (PR #18 review).
+            tb_lines = tb.splitlines()
+            job.emit("__job__", "error", tb_lines[-1] if tb_lines else first_line)
         else:
             with job._lock:
                 job.status = "done"
                 job.finished_at = datetime.now(UTC)
-            job.events.append(JobEvent(step="__job__", status="done", detail=""))
+            job.emit("__job__", "done", "")
 
     def shutdown(self) -> None:
         self._executor.shutdown(wait=False, cancel_futures=True)

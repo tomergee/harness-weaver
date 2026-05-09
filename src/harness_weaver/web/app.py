@@ -321,6 +321,14 @@ def create_app(
         name="static",
     )
 
+    @app.on_event("shutdown")
+    def _shutdown() -> None:
+        # Give the worker pool a chance to drain on a clean uvicorn stop;
+        # in-flight harness calls can't be cancelled mid-SDK-stream so
+        # we accept that ctrl-c during a run leaves the worker running
+        # until it returns. PR #18 review.
+        registry.shutdown()
+
     # --- pages -------------------------------------------------------------
 
     @app.get("/", response_class=HTMLResponse)
@@ -493,15 +501,24 @@ def create_app(
             # when the SDK call is long and quiet between phase events.
             ticks_since_heartbeat = 0
             while True:
-                # Drain any new events under the worker's lock.
+                # Hold the lock only long enough to copy whatever new
+                # event records appeared since our cursor (PR #18 review:
+                # an async function holding RLock blocks the event loop;
+                # keeping it short is the cheap fix without dragging in a
+                # cross-thread asyncio.Queue).
                 with job._lock:
                     new = list(job.events[cursor:])
                     cursor = len(job.events)
-                    snapshot = job.snapshot() if new else None
+                # Capture terminal state independently of whether new
+                # events landed in this tick. PR #18 review: if the
+                # worker finished between two ticks without emitting,
+                # the previous "snapshot if new" guard kept the loop
+                # spinning forever.
+                is_done = job.is_terminal()
                 for event in new:
                     yield f"data: {json.dumps(event.to_dict())}\n\n"
-                if snapshot is not None and job.is_terminal():
-                    yield f"event: done\ndata: {json.dumps(snapshot)}\n\n"
+                if is_done:
+                    yield f"event: done\ndata: {json.dumps(job.snapshot())}\n\n"
                     break
                 ticks_since_heartbeat += 1
                 if ticks_since_heartbeat >= 15:  # ~3s at 200ms tick
