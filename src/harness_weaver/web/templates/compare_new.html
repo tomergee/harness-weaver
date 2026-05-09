@@ -8,60 +8,76 @@
 {% endif %}
 
 <p class="warning">
-  Submitting will block your browser for ~30-90 seconds — two runs back to
-  back, plus a judge call if you fill the judge model field.
+  Submitting hands the job to the worker thread and redirects to
+  <code>/jobs/{id}</code>. Two SDK calls back-to-back (one per
+  configuration), plus an optional judge call when the judge model is
+  set. The job page shows each phase live.
 </p>
 
-<form method="post" action="/compare/new" class="run-form">
-  <label>
-    Task
-    <select name="task" required>
-      {% for t in tasks %}
-        <option value="{{ t }}">{{ t }}</option>
-      {% endfor %}
-    </select>
-  </label>
-
-  <label>
-    Configuration A
-    <select name="config_a" required>
-      {% for c in configs %}
-        <option value="{{ c.name }}">{{ c.name }}</option>
-      {% endfor %}
-    </select>
-  </label>
-
-  <label>
-    Configuration B
-    <select name="config_b" required>
-      {% for c in configs %}
-        <option value="{{ c.name }}">{{ c.name }}</option>
-      {% endfor %}
-    </select>
-  </label>
-
-  <label>
-    Model override (applied to both A and B; optional)
-    <input type="text" name="model" placeholder="claude-haiku-4-5-20251001">
-  </label>
-
-  <label>
-    Judge model (optional — paid; opt in to get an LLM verdict)
-    <input type="text" name="judge_model" placeholder="anthropic/claude-haiku-4-5-20251001">
-  </label>
-
-  <fieldset>
-    <legend>Execution backend</legend>
-    <label class="inline">
-      <input type="checkbox" name="use_k8s" value="true">
-      Use Kubernetes sandbox
-    </label>
+<div class="form-grid">
+  <form method="post" action="/compare/new" class="run-form" id="run-form">
     <label>
-      K8s namespace
-      <input type="text" name="k8s_namespace" value="default">
+      Task
+      <select name="task" required>
+        {% for t in tasks %}
+          <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
     </label>
-  </fieldset>
 
-  <button type="submit">Compare</button>
-</form>
+    <label>
+      Configuration A
+      <select name="config_a" id="config-picker" required>
+        {% for c in configs %}
+          <option value="{{ c.name }}">{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>
+      Configuration B
+      <select name="config_b" id="config-picker-b" required>
+        {% for c in configs %}
+          <option value="{{ c.name }}">{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>
+      Model override (applied to both A and B; optional)
+      <input type="text" name="model" placeholder="claude-haiku-4-5-20251001">
+    </label>
+
+    <label>
+      Judge model (optional — paid; opt in to get an LLM verdict)
+      <input type="text" name="judge_model" placeholder="anthropic/claude-haiku-4-5-20251001">
+    </label>
+
+    <fieldset>
+      <legend>Execution backend</legend>
+      <label class="inline">
+        <input type="checkbox" name="use_k8s" value="true">
+        Use Kubernetes sandbox
+      </label>
+      <label>
+        K8s namespace
+        <input type="text" name="k8s_namespace" value="default">
+      </label>
+    </fieldset>
+
+    <button type="submit">Compare</button>
+  </form>
+
+  <aside class="config-explainer" id="config-explainer">
+    <h2>Configuration A</h2>
+    <p class="meta">Updates when you pick a different option.</p>
+    <div class="explainer-body" id="config-explainer-body">…</div>
+
+    <h2>Configuration B</h2>
+    <div class="explainer-body" id="config-explainer-body-b">…</div>
+  </aside>
+</div>
+
+<script type="application/json" id="config-summaries-data">{{ config_summaries|tojson }}</script>
+<script src="{{ url_for('static', path='form.js') }}"></script>
 {% endblock %}

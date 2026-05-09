@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Job {{ job.id }} — harness-weaver{% endblock %}
+{% block content %}
+<h1>{{ job.title }}</h1>
+
+<p class="meta">
+  Job <code>{{ job.id }}</code>
+  &nbsp;·&nbsp; type <strong>{{ job.job_type }}</strong>
+  &nbsp;·&nbsp; status
+  <strong id="job-status" data-status="{{ job.status }}">{{ job.status }}</strong>
+</p>
+
+<section class="job-stats">
+  <dl class="summary">
+    <dt>Elapsed</dt>
+    <dd><span id="job-timer" data-started-at="{{ job.started_at or '' }}">—</span></dd>
+    <dt>Steps complete</dt>
+    <dd><span id="job-progress">0 / {{ job.steps|length }}</span></dd>
+  </dl>
+</section>
+
+<section>
+  <h2>Plan</h2>
+  <ol class="step-list" id="step-list">
+    {% for step in job.steps %}
+      <li class="step step--{{ step.status }}" data-step-id="{{ step.id }}">
+        <span class="step-marker" aria-hidden="true"></span>
+        <div class="step-body">
+          <strong class="step-label">{{ step.label }}</strong>
+          <div class="step-description">{{ step.description }}</div>
+          <div class="step-detail" id="step-detail-{{ step.id }}"></div>
+        </div>
+      </li>
+    {% endfor %}
+  </ol>
+</section>
+
+<section>
+  <h2>Live event log</h2>
+  <p class="meta">
+    Phase events stream from the server via Server-Sent Events. Each
+    line is one transition: pending → running → done (or → error).
+  </p>
+  <ul class="event-log" id="event-log"></ul>
+</section>
+
+<section id="job-error" hidden>
+  <h2>Error</h2>
+  <pre class="final-answer" id="job-error-detail"></pre>
+  <p>
+    <a href="{{ url_for('runs_new_form') }}">Try again</a> or go
+    <a href="/">back to the index</a>.
+  </p>
+</section>
+
+<section id="job-redirect-notice" hidden>
+  <p class="meta">
+    Job finished. Redirecting to <a id="job-redirect-link" href="#">the result</a>
+    in <span id="job-redirect-countdown">3</span>s…
+  </p>
+</section>
+
+<script src="{{ url_for('static', path='job.js') }}"></script>
+{% endblock %}

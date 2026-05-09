@@ -1,57 +1,59 @@
 """FastAPI app factory for the web UI.
 
-Five pages, all server-rendered:
+Pages, all server-rendered:
 
 * ``/``                          — landing page; lists existing trajectories
                                    and reports under ``runs/``, links to the
                                    forms below.
-* ``/runs/new``                  — form to kick off a single run; submitting
-                                   blocks the browser until the run finishes
-                                   (~20-60s live), then redirects to the
-                                   trajectory view.
+* ``/runs/new``                  — form to kick off a single run. Picking a
+                                   configuration shows its tools, model, and
+                                   agent topology in a live sidebar.
 * ``/compare/new``               — form to run two configurations side by
-                                   side; emits a structural report (and an
-                                   LLM verdict when ``judge_model`` is set).
+                                   side. Same sidebar pattern, plus an
+                                   optional ``judge_model`` field.
 * ``/eval/new``                  — form to evaluate one configuration over a
-                                   task pack; emits a markdown summary.
+                                   task pack.
+* ``/jobs/{id}``                 — live status page for a submitted job.
+                                   Shows the planned step list, an elapsed
+                                   timer, and an SSE-fed log of phase events.
+                                   Auto-redirects to the trajectory or report
+                                   when the job finishes.
+* ``/jobs/{id}/events``          — Server-Sent Events stream feeding the live
+                                   status page. Yields one event per phase
+                                   transition; closes when the job is terminal.
 * ``/trajectories/{filename}``   — renders a trajectory JSON file readably
                                    (timeline, final answer, cost / turns /
                                    duration).
 * ``/reports/{filename}``        — renders a markdown report file as HTML.
 
-Single uvicorn worker, sync execution. No streaming, no background queue,
-no auth. Bind to 127.0.0.1; if you expose this on a network you take the
-risk yourself.
+Form submissions used to block the browser for the duration of the
+harness call (20-90s). They now enqueue a :class:`Job` on a single-worker
+ThreadPoolExecutor and 303-redirect to ``/jobs/{id}``; the job page
+opens an EventSource on the SSE endpoint and renders progress live.
+
+No auth. Bind to 127.0.0.1.
 
 The harness instance is constructed via the :class:`HarnessFactory`
 protocol — production wires :class:`DefaultHarnessFactory` (which builds
 real Harnesses with ``RealAgentRunner``); tests inject a fake.
 """
 
+import asyncio
 import json
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
 import bleach
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from harness_weaver.catalog import Catalog
-from harness_weaver.configurations import (
-    Configuration,
-    builtin_configurations,
-    configuration_by_name,
-)
+from harness_weaver.configurations import builtin_configurations
 from harness_weaver.harness import Harness
-from harness_weaver.task import Task, TaskPack
-
-if TYPE_CHECKING:  # pragma: no cover
-    from harness_weaver.trajectory import Trajectory
+from harness_weaver.web.jobs import JobRegistry, configuration_summary
 
 # --- Harness factory seam ---------------------------------------------------
 
@@ -123,13 +125,6 @@ class _DefaultHarnessCtx:
 # --- App factory ------------------------------------------------------------
 
 
-def _resolve_config(name: str, model_override: str | None) -> Configuration:
-    cfg = configuration_by_name(name)
-    if model_override is None or model_override == "":
-        return cfg
-    return cfg.model_copy(update={"model": model_override})
-
-
 def _list_runs_dir(runs_dir: Path) -> tuple[list[Path], list[Path]]:
     """Return ``(trajectories, reports)`` from ``runs_dir``, sorted newest first."""
     if not runs_dir.exists():
@@ -172,12 +167,6 @@ def _safe_join(base: Path, name: str) -> Path | None:
     if not candidate.is_file():
         return None
     return candidate
-
-
-@contextmanager
-def _runs_output(runs_dir: Path) -> Iterator[Path]:
-    runs_dir.mkdir(parents=True, exist_ok=True)
-    yield runs_dir
 
 
 def _find_repo_root() -> Path:
@@ -308,6 +297,16 @@ def create_app(
     repo_root_path = Path(repo_root) if repo_root is not None else _find_repo_root()
     factory: HarnessFactory = harness_factory or DefaultHarnessFactory()
 
+    # The job registry owns the worker thread pool. Single-worker so jobs
+    # serialize — the harness's sync API stays sync, and concurrent
+    # submissions from a frantically-clicking user queue up rather than
+    # fighting for the API key budget.
+    registry = JobRegistry(
+        repo_root=repo_root_path,
+        runs_dir=runs_dir_path,
+        factory=factory,
+    )
+
     here = Path(__file__).resolve().parent
     templates = Jinja2Templates(directory=str(here / "templates"))
 
@@ -336,6 +335,22 @@ def create_app(
             },
         )
 
+    def _config_summaries() -> dict[str, Any]:
+        """Pre-computed configuration metadata for the form sidebar.
+
+        Embedded as JSON in the form templates; the JS sidebar reads
+        from a hidden ``<script type="application/json">`` rather than
+        making a fetch round-trip on every selection.
+        """
+        return {cfg.name: configuration_summary(cfg.name) for cfg in builtin_configurations()}
+
+    def _path_under_repo(rel_path: str) -> Path | None:
+        """Resolve ``rel_path`` against the repo root and reject escapes."""
+        candidate = (repo_root_path / rel_path).resolve()
+        if repo_root_path not in candidate.parents:
+            return None
+        return candidate
+
     @app.get("/runs/new", response_class=HTMLResponse)
     def runs_new_form(request: Request, error: str = "") -> Any:
         tasks, _ = _list_examples(repo_root_path)
@@ -345,6 +360,7 @@ def create_app(
             {
                 "tasks": [str(p.relative_to(repo_root_path)) for p in tasks],
                 "configs": list(builtin_configurations()),
+                "config_summaries": _config_summaries(),
                 "error": _humanize_error(error),
             },
         )
@@ -357,18 +373,18 @@ def create_app(
         use_k8s: bool = Form(False),
         k8s_namespace: str = Form("default"),
     ) -> Any:
-        cfg = _resolve_config(config, model)
-        task_path = (repo_root_path / task).resolve()
-        # Reject paths that aren't under the repo root or examples/.
-        if repo_root_path not in task_path.parents:
+        if _path_under_repo(task) is None:
             return RedirectResponse(url="/runs/new?error=bad_task_path", status_code=303)
-        task_obj = Task.from_path(task_path)
-        with factory(use_k8s=use_k8s, k8s_namespace=k8s_namespace) as harness:
-            trajectory = harness.run(task_obj, cfg)
-        with _runs_output(runs_dir_path) as out:
-            out_path = out / f"{trajectory.task_id}.{cfg.name}.json"
-            out_path.write_text(trajectory.model_dump_json(indent=2), encoding="utf-8")
-        return RedirectResponse(url=f"/trajectories/{out_path.name}", status_code=303)
+        job = registry.submit_run(
+            {
+                "task": task,
+                "config": config,
+                "model": model,
+                "use_k8s": use_k8s,
+                "k8s_namespace": k8s_namespace,
+            }
+        )
+        return RedirectResponse(url=f"/jobs/{job.id}", status_code=303)
 
     @app.get("/compare/new", response_class=HTMLResponse)
     def compare_new_form(request: Request, error: str = "") -> Any:
@@ -379,6 +395,7 @@ def create_app(
             {
                 "tasks": [str(p.relative_to(repo_root_path)) for p in tasks],
                 "configs": list(builtin_configurations()),
+                "config_summaries": _config_summaries(),
                 "error": _humanize_error(error),
             },
         )
@@ -393,49 +410,20 @@ def create_app(
         use_k8s: bool = Form(False),
         k8s_namespace: str = Form("default"),
     ) -> Any:
-        from harness_weaver.judge import StructuralReport, render_markdown
-
-        cfg_a = _resolve_config(config_a, model)
-        cfg_b = _resolve_config(config_b, model)
-        task_path = (repo_root_path / task).resolve()
-        if repo_root_path not in task_path.parents:
+        if _path_under_repo(task) is None:
             return RedirectResponse(url="/compare/new?error=bad_task_path", status_code=303)
-        task_obj = Task.from_path(task_path)
-        trajs: list[Trajectory] = []
-        with factory(use_k8s=use_k8s, k8s_namespace=k8s_namespace) as harness:
-            # Per-leg index in the filename so config_a == config_b doesn't
-            # cause the second trajectory to overwrite the first
-            # (PR #11 review). With distinct config names this just adds a
-            # ``.0`` / ``.1`` suffix; cheap, predictable, no surprises.
-            for index, cfg in enumerate((cfg_a, cfg_b)):
-                trajectory = harness.run(task_obj, cfg)
-                with _runs_output(runs_dir_path) as out:
-                    (out / f"{trajectory.task_id}.{cfg.name}.{index}.json").write_text(
-                        trajectory.model_dump_json(indent=2), encoding="utf-8"
-                    )
-                trajs.append(trajectory)
-        report = StructuralReport.of(trajs[0], trajs[1], task=task_obj)
-        with _runs_output(runs_dir_path) as out:
-            report_path = out / f"{task_obj.task_id}.compare.md"
-            report_path.write_text(render_markdown(report), encoding="utf-8")
-        if judge_model:
-            import asyncio
-
-            from harness_weaver.judge.llm import InspectAILlmJudge
-
-            judge = InspectAILlmJudge(model=judge_model)
-            verdict = asyncio.run(
-                judge.verdict(
-                    task=task_obj,
-                    trajectory_a=trajs[0],
-                    trajectory_b=trajs[1],
-                )
-            )
-            with _runs_output(runs_dir_path) as out:
-                (out / f"{task_obj.task_id}.compare.verdict.json").write_text(
-                    verdict.model_dump_json(indent=2), encoding="utf-8"
-                )
-        return RedirectResponse(url=f"/reports/{report_path.name}", status_code=303)
+        job = registry.submit_compare(
+            {
+                "task": task,
+                "config_a": config_a,
+                "config_b": config_b,
+                "model": model,
+                "judge_model": judge_model,
+                "use_k8s": use_k8s,
+                "k8s_namespace": k8s_namespace,
+            }
+        )
+        return RedirectResponse(url=f"/jobs/{job.id}", status_code=303)
 
     @app.get("/eval/new", response_class=HTMLResponse)
     def eval_new_form(request: Request, error: str = "") -> Any:
@@ -446,6 +434,7 @@ def create_app(
             {
                 "packs": [str(p.relative_to(repo_root_path)) for p in packs],
                 "configs": list(builtin_configurations()),
+                "config_summaries": _config_summaries(),
                 "error": _humanize_error(error),
             },
         )
@@ -458,27 +447,87 @@ def create_app(
         use_k8s: bool = Form(False),
         k8s_namespace: str = Form("default"),
     ) -> Any:
-        from harness_weaver.judge import PackSummary, render_pack_markdown
-
-        cfg = _resolve_config(config, model)
-        pack_path = (repo_root_path / pack).resolve()
-        if repo_root_path not in pack_path.parents:
+        if _path_under_repo(pack) is None:
             return RedirectResponse(url="/eval/new?error=bad_pack_path", status_code=303)
-        pack_obj = TaskPack.from_path(pack_path)
-        trajs: list[Trajectory] = []
-        with factory(use_k8s=use_k8s, k8s_namespace=k8s_namespace) as harness:
-            for task_obj in pack_obj.tasks:
-                trajectory = harness.run(task_obj, cfg)
-                with _runs_output(runs_dir_path) as out:
-                    (out / f"{trajectory.task_id}.{cfg.name}.json").write_text(
-                        trajectory.model_dump_json(indent=2), encoding="utf-8"
-                    )
-                trajs.append(trajectory)
-        summary = PackSummary.of(trajs, pack=pack_obj, configuration_name=cfg.name)
-        with _runs_output(runs_dir_path) as out:
-            summary_path = out / f"{pack_obj.name}.{cfg.name}.eval.md"
-            summary_path.write_text(render_pack_markdown(summary), encoding="utf-8")
-        return RedirectResponse(url=f"/reports/{summary_path.name}", status_code=303)
+        job = registry.submit_eval(
+            {
+                "pack": pack,
+                "config": config,
+                "model": model,
+                "use_k8s": use_k8s,
+                "k8s_namespace": k8s_namespace,
+            }
+        )
+        return RedirectResponse(url=f"/jobs/{job.id}", status_code=303)
+
+    # --- Job pages ---------------------------------------------------------
+    #
+    # Route order matters here: ``/jobs/{job_id}`` matches
+    # ``/jobs/abc.json`` because ``{job_id}`` accepts anything except a
+    # slash. Declare the more specific JSON + SSE routes first so they
+    # win the match.
+
+    @app.get("/jobs/{job_id}.json")
+    def job_json(job_id: str) -> Any:
+        job = registry.get(job_id)
+        if job is None:
+            return HTMLResponse("Job not found", status_code=404)
+        return job.snapshot()
+
+    @app.get("/jobs/{job_id}/events")
+    async def job_events(job_id: str) -> Any:
+        """Server-Sent Events stream for the live job page.
+
+        Polls ``job.events`` from the worker thread on a 200 ms cadence.
+        Each new entry becomes one ``data:`` block. When the job
+        terminates we send one final ``event: done`` so the browser
+        knows to stop and follow the redirect URL.
+        """
+        job = registry.get(job_id)
+        if job is None:
+            return HTMLResponse("Job not found", status_code=404)
+
+        async def stream() -> Any:
+            cursor = 0
+            # Heartbeat every ~3s so proxies / browsers don't time out
+            # when the SDK call is long and quiet between phase events.
+            ticks_since_heartbeat = 0
+            while True:
+                # Drain any new events under the worker's lock.
+                with job._lock:
+                    new = list(job.events[cursor:])
+                    cursor = len(job.events)
+                    snapshot = job.snapshot() if new else None
+                for event in new:
+                    yield f"data: {json.dumps(event.to_dict())}\n\n"
+                if snapshot is not None and job.is_terminal():
+                    yield f"event: done\ndata: {json.dumps(snapshot)}\n\n"
+                    break
+                ticks_since_heartbeat += 1
+                if ticks_since_heartbeat >= 15:  # ~3s at 200ms tick
+                    yield ": heartbeat\n\n"
+                    ticks_since_heartbeat = 0
+                await asyncio.sleep(0.2)
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",  # disable nginx-style proxy buffering
+            },
+        )
+
+    @app.get("/jobs/{job_id}", response_class=HTMLResponse)
+    def job_view(request: Request, job_id: str) -> Any:
+        job = registry.get(job_id)
+        if job is None:
+            return HTMLResponse("Job not found", status_code=404)
+        return templates.TemplateResponse(
+            request,
+            "job.html",
+            {"job": job.snapshot()},
+        )
 
     @app.get("/trajectories/{filename}", response_class=HTMLResponse)
     def trajectory_view(request: Request, filename: str) -> Any:
