@@ -500,6 +500,43 @@ def test_post_runs_new_uses_model_override(
     assert data["task_id"] == "discovery-mood-tense"
 
 
+def test_post_runs_new_unchecked_k8s_disables_backend(
+    tmp_runs_dir: Path,
+    repo_root: Path,
+) -> None:
+    """Unchecked checkbox omits form key; backend selection must become False."""
+    seen: dict[str, object] = {}
+
+    class _RecordingHarnessCtx(_FakeHarnessCtx):
+        pass
+
+    def _factory(*, use_k8s: bool, k8s_namespace: str) -> _RecordingHarnessCtx:
+        seen["use_k8s"] = use_k8s
+        seen["k8s_namespace"] = k8s_namespace
+        return _RecordingHarnessCtx()
+
+    app = create_app(
+        runs_dir=tmp_runs_dir,
+        repo_root=repo_root,
+        harness_factory=_factory,
+    )
+    client = TestClient(app)
+
+    # Simulate browser submit with checkbox unchecked: no `use_k8s` key present.
+    snap = _submit_and_wait(
+        client,
+        "/runs/new",
+        {
+            "task": "examples/tasks/discovery-mood-tense.json",
+            "config": "single-agent-basic",
+            "model": "",
+            "k8s_namespace": "default",
+        },
+    )
+    assert snap["status"] == "done", snap
+    assert seen["use_k8s"] is False
+
+
 # --- Job page + SSE --------------------------------------------------------
 
 
