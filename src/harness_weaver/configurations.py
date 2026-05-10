@@ -77,6 +77,33 @@ class Configuration(BaseModel):
     def is_multi_agent(self) -> bool:
         return bool(self.agents)
 
+    @property
+    def all_allowed_tools(self) -> frozenset[str]:
+        """Union of the orchestrator's and every worker's allow-list.
+
+        This is the surface the agent loop can actually call. The Harness
+        registers tools whose names appear here and *only* those — see
+        :meth:`Harness._build_registry`. If a tool name is missing from
+        this set, no agent in this configuration will ever invoke it,
+        which means the corresponding execution backend stays dormant.
+        """
+        tools: set[str] = set(self.allowed_tools)
+        for agent in self.agents:
+            tools.update(agent.allowed_tools)
+        return frozenset(tools)
+
+    @property
+    def uses_run_python(self) -> bool:
+        """True iff some agent in this configuration can call ``run_python``.
+
+        ``--use-k8s`` only matters for runs that actually call this tool —
+        :class:`AgentSandboxBackend` is lazy, so a configuration without
+        ``run_python`` makes the K8s flag a silent no-op (no pod ever
+        provisioned). The CLI / web UI surface this so users don't think
+        a sandbox is being used when it isn't.
+        """
+        return "run_python" in self.all_allowed_tools
+
     @model_validator(mode="after")
     def _check_agent_role_names(self) -> Self:
         """Reject reserved or duplicate worker role names.

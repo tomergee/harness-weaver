@@ -160,3 +160,105 @@ def test_build_harness_defaults_to_k8s(
         pass
 
     fake_class.assert_called_once_with(namespace="default")
+
+
+# --- _warn_if_k8s_noop ----------------------------------------------------
+
+
+class TestK8sNoopWarning:
+    """The warning the CLI prints when --use-k8s is set but no chosen
+    configuration's agents expose run_python. Without this, the flag
+    silently does nothing — the AgentSandboxBackend is wired in but
+    never reached, and the user wonders why no pod ever shows up.
+    """
+
+    def test_warns_for_single_agent_basic(self) -> None:
+        from io import StringIO
+
+        from rich.console import Console as _Console
+
+        import harness_weaver.cli as cli_mod
+        from harness_weaver.cli import _warn_if_k8s_noop
+        from harness_weaver.configurations import SINGLE_AGENT_BASIC
+
+        buf = StringIO()
+        original = cli_mod.console
+        cli_mod.console = _Console(file=buf, force_terminal=False, width=120)
+        try:
+            _warn_if_k8s_noop(True, SINGLE_AGENT_BASIC)
+        finally:
+            cli_mod.console = original
+
+        out = buf.getvalue()
+        assert "warning" in out.lower()
+        assert "run_python" in out
+        assert "single-agent-basic" in out
+        assert "single-agent-with-sandbox" in out  # the suggested fix
+
+    def test_no_warning_for_multi_agent_discovery_explainer(self) -> None:
+        """The multi-agent built-in's discovery worker has run_python in
+        its allow-list — ``uses_run_python`` walks the union of all
+        agents, so the warning is silent. (The agent might still choose
+        not to call it on a given task, but that's a runtime concern,
+        not a configuration concern.)
+        """
+        from io import StringIO
+
+        from rich.console import Console as _Console
+
+        import harness_weaver.cli as cli_mod
+        from harness_weaver.cli import _warn_if_k8s_noop
+        from harness_weaver.configurations import MULTI_AGENT_DISCOVERY_EXPLAINER
+
+        buf = StringIO()
+        original = cli_mod.console
+        cli_mod.console = _Console(file=buf, force_terminal=False, width=120)
+        try:
+            _warn_if_k8s_noop(True, MULTI_AGENT_DISCOVERY_EXPLAINER)
+        finally:
+            cli_mod.console = original
+
+        assert buf.getvalue() == ""
+
+    def test_quiet_when_use_k8s_false(self) -> None:
+        from io import StringIO
+
+        from rich.console import Console as _Console
+
+        import harness_weaver.cli as cli_mod
+        from harness_weaver.cli import _warn_if_k8s_noop
+        from harness_weaver.configurations import SINGLE_AGENT_BASIC
+
+        buf = StringIO()
+        original = cli_mod.console
+        cli_mod.console = _Console(file=buf, force_terminal=False, width=120)
+        try:
+            _warn_if_k8s_noop(False, SINGLE_AGENT_BASIC)
+        finally:
+            cli_mod.console = original
+
+        assert buf.getvalue() == ""
+
+    def test_quiet_when_a_config_uses_run_python(self) -> None:
+        """Compare-style: as long as *one* of the configs hits the
+        sandbox, the flag isn't a no-op — no warning."""
+        from io import StringIO
+
+        from rich.console import Console as _Console
+
+        import harness_weaver.cli as cli_mod
+        from harness_weaver.cli import _warn_if_k8s_noop
+        from harness_weaver.configurations import (
+            SINGLE_AGENT_BASIC,
+            SINGLE_AGENT_WITH_SANDBOX,
+        )
+
+        buf = StringIO()
+        original = cli_mod.console
+        cli_mod.console = _Console(file=buf, force_terminal=False, width=120)
+        try:
+            _warn_if_k8s_noop(True, SINGLE_AGENT_BASIC, SINGLE_AGENT_WITH_SANDBOX)
+        finally:
+            cli_mod.console = original
+
+        assert buf.getvalue() == ""

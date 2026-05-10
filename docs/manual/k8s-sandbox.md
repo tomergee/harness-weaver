@@ -146,6 +146,41 @@ harness-weaver compare examples/tasks/analytical-runtime-rating.json \
     --use-k8s
 ```
 
+### When `--use-k8s` is a no-op
+
+`AgentSandboxBackend` is **lazy**: it provisions a sandbox pod the
+first time the agent calls `run_python`, not at startup. If your
+chosen configuration's agents don't have `run_python` in their
+allowed-tools, **`--use-k8s` does nothing** — the backend is wired
+in, but no agent ever reaches it, so no pod gets created.
+
+Of the three built-in configurations:
+
+| Configuration | `run_python` reachable? | Effect of `--use-k8s` |
+|---|---|---|
+| `single-agent-basic` | no | flag is a no-op (catalog tools only) |
+| `single-agent-with-sandbox` | **yes** (orchestrator) | pod provisioned on first call |
+| `multi-agent-discovery-explainer` | **yes** (discovery worker) | pod provisioned the first time discovery actually calls it; orchestrator and explainer can't reach it directly |
+
+> **Reachable ≠ called.** `uses_run_python` checks the union of every
+> agent's allow-list. The agent might still choose not to call it on a
+> given task — that's a runtime decision, not a configuration one. If
+> you ran one of these and never saw a pod, it may simply mean the
+> agent answered without needing code execution.
+
+Both the CLI and the web UI surface this:
+
+* CLI prints a yellow warning at the top of `run` / `compare` / `eval`
+  when `--use-k8s` is set but no chosen configuration exposes
+  `run_python`.
+* The web job page's *Build harness* step says either "pod will be
+  provisioned on the first run_python call" or "no agent in `<name>`
+  exposes run_python, so no sandbox pod will be provisioned (the
+  flag is a no-op for this configuration)".
+
+If you want the sandbox to actually run, pick `single-agent-with-sandbox`
+or define a custom configuration that allows `run_python`.
+
 ## Tear down
 
 ```bash

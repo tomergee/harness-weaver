@@ -184,6 +184,31 @@ _K8S_NAMESPACE_HELP = (
 )
 
 
+def _warn_if_k8s_noop(use_k8s: bool, *configurations: "Configuration") -> None:
+    """Warn when ``--use-k8s`` is set but no chosen configuration exposes run_python.
+
+    :class:`AgentSandboxBackend` only provisions a pod the first time
+    ``run_python`` is called. A configuration whose agents don't have
+    ``run_python`` in their allowed_tools makes the flag a silent no-op
+    — the harness wires the backend in, but nothing ever reaches it.
+    Print a yellow warning so the user knows their flag isn't doing
+    what the name implies.
+    """
+    if not use_k8s:
+        return
+    if any(cfg.uses_run_python for cfg in configurations):
+        return
+    names = ", ".join(cfg.name for cfg in configurations)
+    console.print(
+        "[yellow]warning:[/yellow] --use-k8s is set but no agent in "
+        f"{names} exposes [bold]run_python[/bold]. The "
+        "AgentSandboxBackend is lazy — no sandbox pod will be "
+        "provisioned for this run. Pass --no-use-k8s to silence this "
+        "warning, or pick a configuration that includes run_python "
+        "(e.g. [bold]single-agent-with-sandbox[/bold])."
+    )
+
+
 @app.command()
 def run(
     task: Annotated[Path, typer.Argument(help="Path to a task JSON file.", exists=True)],
@@ -204,15 +229,14 @@ def run(
     output_dir: Annotated[
         Path, typer.Option("--output-dir", help="Directory for trajectory output.")
     ] = Path("runs"),
-    use_k8s: Annotated[
-        bool, typer.Option("--use-k8s/--no-use-k8s", help=_K8S_FLAG_HELP)
-    ] = True,
+    use_k8s: Annotated[bool, typer.Option("--use-k8s/--no-use-k8s", help=_K8S_FLAG_HELP)] = True,
     k8s_namespace: Annotated[
         str, typer.Option("--k8s-namespace", help=_K8S_NAMESPACE_HELP)
     ] = "default",
 ) -> None:
     """Run a single task with one configuration; emit a trajectory."""
     cfg = _resolve_config(config, model)
+    _warn_if_k8s_noop(use_k8s, cfg)
     task_obj = Task.from_path(task)
     with _build_harness(use_k8s=use_k8s, k8s_namespace=k8s_namespace) as harness:
         trajectory = harness.run(task_obj, cfg)
@@ -245,9 +269,7 @@ def compare(
     output_dir: Annotated[
         Path, typer.Option("--output-dir", help="Directory for comparison output.")
     ] = Path("runs"),
-    use_k8s: Annotated[
-        bool, typer.Option("--use-k8s/--no-use-k8s", help=_K8S_FLAG_HELP)
-    ] = True,
+    use_k8s: Annotated[bool, typer.Option("--use-k8s/--no-use-k8s", help=_K8S_FLAG_HELP)] = True,
     k8s_namespace: Annotated[
         str, typer.Option("--k8s-namespace", help=_K8S_NAMESPACE_HELP)
     ] = "default",
@@ -269,6 +291,7 @@ def compare(
 
     cfg_a = _resolve_config(config_a, model)
     cfg_b = _resolve_config(config_b, model)
+    _warn_if_k8s_noop(use_k8s, cfg_a, cfg_b)
     task_obj = Task.from_path(task)
     trajectories = []
     with _build_harness(use_k8s=use_k8s, k8s_namespace=k8s_namespace) as harness:
@@ -316,9 +339,7 @@ def eval_(
     output_dir: Annotated[
         Path, typer.Option("--output-dir", help="Directory for evaluation output.")
     ] = Path("runs"),
-    use_k8s: Annotated[
-        bool, typer.Option("--use-k8s/--no-use-k8s", help=_K8S_FLAG_HELP)
-    ] = True,
+    use_k8s: Annotated[bool, typer.Option("--use-k8s/--no-use-k8s", help=_K8S_FLAG_HELP)] = True,
     k8s_namespace: Annotated[
         str, typer.Option("--k8s-namespace", help=_K8S_NAMESPACE_HELP)
     ] = "default",
@@ -335,6 +356,7 @@ def eval_(
     from harness_weaver.judge import PackSummary, render_pack_markdown
 
     cfg = _resolve_config(config, model)
+    _warn_if_k8s_noop(use_k8s, cfg)
     pack_obj = TaskPack.from_path(pack)
     trajectories = []
     with _build_harness(use_k8s=use_k8s, k8s_namespace=k8s_namespace) as harness:

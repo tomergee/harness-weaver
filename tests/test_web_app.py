@@ -652,3 +652,84 @@ def test_form_renders_config_summaries_for_sidebar(client: TestClient) -> None:
 
 # Keep the import quiet for ruff if unused.
 _ = SINGLE_AGENT_BASIC
+
+
+# --- build-harness step detail (K8s no-op surfacing) ----------------------
+
+
+def test_build_harness_step_says_no_op_for_basic_config(
+    client: TestClient, fake_factory: list[_FakeHarnessCtx]
+) -> None:
+    """The build-harness step on the live job page must call out that
+    --use-k8s does nothing for single-agent-basic (no run_python in
+    any agent's allowed-tools). User-visible UX bug otherwise."""
+    del fake_factory
+    snap = _submit_and_wait(
+        client,
+        "/runs/new",
+        {
+            "task": "examples/tasks/discovery-mood-tense.json",
+            "config": "single-agent-basic",
+            "model": "",
+            "use_k8s": "true",
+            "k8s_namespace": "default",
+        },
+    )
+    detail = next(
+        e["detail"]
+        for e in snap["events"]
+        if e["step"] == "build-harness" and e["status"] == "done"
+    )
+    assert "AgentSandboxBackend" in detail
+    assert "no agent" in detail
+    assert "single-agent-basic" in detail
+    assert "no-op" in detail
+
+
+def test_build_harness_step_says_pod_will_be_provisioned_for_sandbox_config(
+    client: TestClient, fake_factory: list[_FakeHarnessCtx]
+) -> None:
+    """And the inverse: when the config DOES expose run_python, the
+    step says a pod will be provisioned."""
+    del fake_factory
+    snap = _submit_and_wait(
+        client,
+        "/runs/new",
+        {
+            "task": "examples/tasks/discovery-mood-tense.json",
+            "config": "single-agent-with-sandbox",
+            "model": "",
+            "use_k8s": "true",
+            "k8s_namespace": "default",
+        },
+    )
+    detail = next(
+        e["detail"]
+        for e in snap["events"]
+        if e["step"] == "build-harness" and e["status"] == "done"
+    )
+    assert "AgentSandboxBackend" in detail
+    assert "pod will be provisioned" in detail
+
+
+def test_build_harness_step_says_local_when_use_k8s_false(
+    client: TestClient, fake_factory: list[_FakeHarnessCtx]
+) -> None:
+    del fake_factory
+    snap = _submit_and_wait(
+        client,
+        "/runs/new",
+        {
+            "task": "examples/tasks/discovery-mood-tense.json",
+            "config": "single-agent-with-sandbox",
+            "model": "",
+            # use_k8s omitted from the form — checkbox-unchecked semantics.
+            "k8s_namespace": "default",
+        },
+    )
+    detail = next(
+        e["detail"]
+        for e in snap["events"]
+        if e["step"] == "build-harness" and e["status"] == "done"
+    )
+    assert "LocalSubprocessBackend" in detail
