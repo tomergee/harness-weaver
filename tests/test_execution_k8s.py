@@ -419,3 +419,61 @@ class TestTelemetry:
             total_call_seconds=0.0,
         )
         assert tel.average_call_seconds == 0.0
+
+    def test_telemetry_resets_counters_after_read(self) -> None:
+        """PR #20 review: counters reset on each telemetry() read.
+
+        In multi-task flows (``eval``, ``compare``) the Harness calls
+        telemetry() after every trajectory; without the reset, each
+        successive trajectory's telemetry would carry the previous
+        ones' activity and the CLI summary's aggregate-across-list
+        would double-count. ``started_at`` does *not* reset — the pod
+        is still the same pod.
+        """
+        sandbox = _fake_sandbox()
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client)
+        backend.run(ExecutionRequest(code="print(1)"))
+        backend.run(ExecutionRequest(code="print(2)"))
+
+        first = backend.telemetry()
+        assert first is not None
+        assert first.call_count == 2
+
+        # No further run() calls in between; second read should be
+        # zero counts but the same provisioning timestamp.
+        second = backend.telemetry()
+        assert second is not None
+        assert second.call_count == 0
+        assert second.total_call_seconds == 0.0
+        assert second.started_at == first.started_at
+
+    def test_telemetry_resets_when_fresh_pod_is_provisioned(self) -> None:
+        """PR #20 review: close() leaves the counters where they were,
+        but the next ``run()`` provisions a fresh pod via
+        ``_ensure_sandbox``, which must reset the counters so the new
+        pod's stats don't include the previous pod's activity.
+        ``started_at`` advances to the new pod's provisioning time.
+        """
+        sandbox_1 = _fake_sandbox()
+        sandbox_2 = _fake_sandbox()
+        client = MagicMock()
+        client.create_sandbox.side_effect = [sandbox_1, sandbox_2]
+        backend = AgentSandboxBackend(client=client)
+        backend.run(ExecutionRequest(code="print(1)"))
+        backend.run(ExecutionRequest(code="print(2)"))
+        first = backend.telemetry()
+        assert first is not None
+        assert first.call_count == 2
+        first_started_at = first.started_at
+
+        # Close terminates the pod; the next run gets a fresh one.
+        backend.close()
+        backend.run(ExecutionRequest(code="print(3)"))
+        second = backend.telemetry()
+        assert second is not None
+        # The new pod has *only* the one call we made under it,
+        # not 2 + 1.
+        assert second.call_count == 1
+        # started_at advanced to the new pod's provisioning time.
+        assert second.started_at >= first_started_at
