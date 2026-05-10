@@ -1,13 +1,12 @@
 # SandboxTemplate the harness's AgentSandboxBackend instantiates by default.
 # Apply with: kubectl apply -n default -f scripts/python-sandbox-template.yaml
 #
-# Image: a slim official Python that has python3 on PATH. The agent-sandbox
-# controller bolts its server side into the pod automatically — the template
-# only specifies the container image and resource limits.
+# IMPORTANT: k8s-agent-sandbox's local tunnel mode talks to a runtime HTTP API
+# on :8888 (/execute). To avoid external image pull fragility, this template
+# runs a tiny stdlib-only Python HTTP server on top of python:3.11-slim.
 #
-# Fields are deliberately conservative — small CPU/memory request and limit,
-# no networking egress restrictions (the harness's run_python is for data
-# manipulation, not network calls; tighten via NetworkPolicy if you want).
+# Fields are deliberately conservative — small CPU/memory request and limit.
+# Tighten with NetworkPolicy if your deployment needs stricter egress control.
 #
 apiVersion: extensions.agents.x-k8s.io/v1alpha1
 kind: SandboxTemplate
@@ -19,7 +18,136 @@ spec:
       containers:
         - name: sandbox
           image: python:3.11-slim
-          command: ["sleep", "infinity"]  # the controller exec()s into here
+          command: ["python3", "-u", "-c"]
+          args:
+            - |
+              import cgi
+              import io
+              import json
+              import os
+              import subprocess
+              import urllib.parse
+              from http.server import BaseHTTPRequestHandler, HTTPServer
+
+              ROOT = "/tmp"
+
+
+              def _resolve(path):
+                  normalized = os.path.normpath(path or ROOT)
+                  if os.path.isabs(normalized):
+                      return normalized
+                  return os.path.join(ROOT, normalized)
+
+
+              class Handler(BaseHTTPRequestHandler):
+                  def _json(self, status, payload):
+                      body = json.dumps(payload).encode("utf-8")
+                      self.send_response(status)
+                      self.send_header("Content-Type", "application/json")
+                      self.send_header("Content-Length", str(len(body)))
+                      self.end_headers()
+                      self.wfile.write(body)
+
+                  def _raw(self, status, body):
+                      self.send_response(status)
+                      self.send_header("Content-Type", "application/octet-stream")
+                      self.send_header("Content-Length", str(len(body)))
+                      self.end_headers()
+                      self.wfile.write(body)
+
+                  def do_GET(self):
+                      if self.path == "/healthz":
+                          return self._json(200, {"ok": True})
+                      if self.path.startswith("/download/"):
+                          rel = urllib.parse.unquote(self.path[len("/download/"):])
+                          target = _resolve(rel)
+                          if not os.path.exists(target) or os.path.isdir(target):
+                              return self._json(404, {"error": "not found"})
+                          with open(target, "rb") as f:
+                              return self._raw(200, f.read())
+                      if self.path.startswith("/list/"):
+                          rel = urllib.parse.unquote(self.path[len("/list/"):])
+                          target = _resolve(rel)
+                          if not os.path.isdir(target):
+                              return self._json(404, {"error": "not a directory"})
+                          entries = []
+                          for name in os.listdir(target):
+                              full = os.path.join(target, name)
+                              stat = os.stat(full)
+                              entries.append(
+                                  {
+                                      "name": name,
+                                      "size": 0 if os.path.isdir(full) else int(stat.st_size),
+                                      "type": "directory" if os.path.isdir(full) else "file",
+                                      "mod_time": float(stat.st_mtime),
+                                  }
+                              )
+                          return self._json(200, entries)
+                      if self.path.startswith("/exists/"):
+                          rel = urllib.parse.unquote(self.path[len("/exists/"):])
+                          target = _resolve(rel)
+                          return self._json(200, {"exists": os.path.exists(target)})
+                      return self._json(404, {"error": "not found"})
+
+                  def do_POST(self):
+                      if self.path == "/upload":
+                          try:
+                              length = int(self.headers.get("Content-Length", "0"))
+                              body = self.rfile.read(length)
+                              form = cgi.FieldStorage(
+                                  fp=io.BytesIO(body),
+                                  headers=self.headers,
+                                  environ={
+                                      "REQUEST_METHOD": "POST",
+                                      "CONTENT_TYPE": self.headers.get("Content-Type", ""),
+                                  },
+                              )
+                              if "file" not in form:
+                                  return self._json(400, {"error": "missing file field"})
+                              uploaded = form["file"]
+                              filename = os.path.basename(getattr(uploaded, "filename", "") or "upload.bin")
+                              target = os.path.join(ROOT, filename)
+                              payload = uploaded.file.read()
+                              with open(target, "wb") as f:
+                                  f.write(payload)
+                              return self._json(200, {"path": target})
+                          except Exception as exc:
+                              return self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+                      if self.path != "/execute":
+                          return self._json(404, {"error": "not found"})
+                      try:
+                          length = int(self.headers.get("Content-Length", "0"))
+                          raw = self.rfile.read(length).decode("utf-8") if length else "{}"
+                          request = json.loads(raw or "{}")
+                          command = request.get("command")
+                          if not isinstance(command, str) or not command.strip():
+                              return self._json(400, {"error": "missing command"})
+                          completed = subprocess.run(
+                              command,
+                              shell=True,
+                              text=True,
+                              capture_output=True,
+                          )
+                          return self._json(
+                              200,
+                              {
+                                  "stdout": completed.stdout or "",
+                                  "stderr": completed.stderr or "",
+                                  "exit_code": int(completed.returncode),
+                              },
+                          )
+                      except Exception as exc:
+                          return self._json(
+                              500,
+                              {"stdout": "", "stderr": f"{type(exc).__name__}: {exc}", "exit_code": 1},
+                          )
+
+                  def log_message(self, fmt, *args):
+                      return
+
+              HTTPServer(("0.0.0.0", 8888), Handler).serve_forever()
+          ports:
+            - containerPort: 8888
           resources:
             requests:
               cpu: "100m"

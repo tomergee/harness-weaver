@@ -60,12 +60,17 @@ That runs [`scripts/install-agent-sandbox.sh`](../../scripts/install-agent-sandb
    `pyproject.toml`. Override with `CONTROLLER_VERSION=v0.x.y` to
    pick a different tag from
    [the releases page](https://github.com/kubernetes-sigs/agent-sandbox/releases).
-4. Waits up to 3 minutes for the controller to become Ready.
-5. Applies the bundled
+4. Applies the matching
+   `https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${CONTROLLER_VERSION}/extensions.yaml`
+   artifact (adds `SandboxClaim`/`SandboxTemplate` extension CRDs and RBAC).
+5. Waits up to 3 minutes for the controller rollout to settle.
+6. Deploys `sandbox-router-svc` and `sandbox-router-deployment` in your
+   target namespace (required by the Python client's local tunnel mode).
+7. Applies the bundled
    [`scripts/python-sandbox-template.yaml`](../../scripts/python-sandbox-template.yaml)
-   to your target namespace (default: `default`) — a slim
-   `python:3.11-slim` template the harness instantiates when you ask
-   for `template="python"`.
+   to your target namespace (default: `default`) — a
+   `python:3.11-slim` template that starts a lightweight `/execute`
+   runtime server on port `8888` for the Python client.
 
 Idempotent: re-running is safe.
 
@@ -75,6 +80,7 @@ Common overrides (set as env vars before `make install-sandbox`):
 |---|---|---|
 | `NAMESPACE` | `default` | Target namespace for the `SandboxTemplate`. Created if missing. |
 | `CONTROLLER_VERSION` | `v0.4.5` | Release tag of `kubernetes-sigs/agent-sandbox` to install. The script downloads `releases/download/${CONTROLLER_VERSION}/manifest.yaml`. Keep it within the same minor as `k8s-agent-sandbox` in `pyproject.toml` (currently `>=0.4,<0.5`). |
+| `ROUTER_IMAGE` | `us-central1-docker.pkg.dev/k8s-staging-images/agent-sandbox/sandbox-router:latest-main` | Image used for `sandbox-router-deployment`. |
 | `SKIP_CONFIRM` | (unset) | Set to `1` to skip the "is this the right context?" prompt. |
 
 > **Namespace coordination.** If you install to a namespace other than

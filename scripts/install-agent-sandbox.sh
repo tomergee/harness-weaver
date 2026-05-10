@@ -16,7 +16,9 @@
 #      requires both artifacts from the same release tag.
 #   4. Waits up to 3 minutes for the controller to become Ready after each
 #      apply (extensions may roll the Deployment).
-#   5. Applies the bundled scripts/python-sandbox-template.yaml to your
+#   5. Applies the sandbox-router Service/Deployment in the target namespace
+#      (required by k8s-agent-sandbox local tunnel mode).
+#   6. Applies the bundled scripts/python-sandbox-template.yaml to your
 #      target namespace (default: 'default') so the harness's
 #      AgentSandboxBackend can spawn pods from template "python".
 #
@@ -27,6 +29,9 @@
 #                        Python SDK pinned in pyproject.toml at >=0.4,<0.5).
 #                        See https://github.com/kubernetes-sigs/agent-sandbox/releases
 #                        for available tags.
+#   ROUTER_IMAGE         image used by sandbox-router deployment. Defaults to the
+#                        upstream staging image: us-central1-docker.pkg.dev/
+#                        k8s-staging-images/agent-sandbox/sandbox-router:latest-main
 #   SKIP_CONFIRM         set to 1 to skip the context confirmation
 #
 # Usage:
@@ -39,11 +44,13 @@ set -euo pipefail
 NAMESPACE="${NAMESPACE:-default}"
 CONTROLLER_VERSION="${CONTROLLER_VERSION:-v0.4.5}"
 SKIP_CONFIRM="${SKIP_CONFIRM:-0}"
+ROUTER_IMAGE="${ROUTER_IMAGE:-us-central1-docker.pkg.dev/k8s-staging-images/agent-sandbox/sandbox-router:latest-main}"
 # Official release artifact — produced by the upstream release pipeline,
 # not a raw file pulled from a branch. See README.md of
 # kubernetes-sigs/agent-sandbox for the documented install command.
 CONTROLLER_MANIFEST_URL="https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${CONTROLLER_VERSION}/manifest.yaml"
 EXTENSIONS_MANIFEST_URL="https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${CONTROLLER_VERSION}/extensions.yaml"
+ROUTER_MANIFEST_URL="https://raw.githubusercontent.com/kubernetes-sigs/agent-sandbox/${CONTROLLER_VERSION}/clients/python/agentic-sandbox-client/sandbox-router/sandbox_router.yaml"
 TEMPLATE_PATH="$(cd "$(dirname "$0")/.." && pwd)/scripts/python-sandbox-template.yaml"
 
 require() {
@@ -56,6 +63,7 @@ require() {
 
 echo "==> Checking prerequisites..."
 require kubectl
+require curl
 
 CURRENT_CONTEXT=$(kubectl config current-context 2>/dev/null || true)
 if [ -z "${CURRENT_CONTEXT}" ]; then
@@ -74,6 +82,7 @@ fi
 echo "    Context: ${CURRENT_CONTEXT}"
 echo "    Namespace: ${NAMESPACE}"
 echo "    Controller version: ${CONTROLLER_VERSION}"
+echo "    Router image: ${ROUTER_IMAGE}"
 
 if [ "${SKIP_CONFIRM}" != "1" ]; then
     echo
@@ -125,6 +134,26 @@ if ! kubectl -n agent-sandbox-system wait \
 fi
 
 echo
+echo "==> Applying sandbox-router Service/Deployment in namespace '${NAMESPACE}'..."
+# local tunnel mode expects svc/sandbox-router-svc in the same namespace
+# as the sandbox claim/template. The upstream manifest uses IMAGE_PLACEHOLDER.
+if ! curl -fsSL "${ROUTER_MANIFEST_URL}" \
+    | sed "s|\\\${ROUTER_IMAGE}|${ROUTER_IMAGE}|g" \
+    | kubectl apply -n "${NAMESPACE}" -f -; then
+    echo "ERROR: failed to apply sandbox-router manifest from ${ROUTER_MANIFEST_URL}"
+    echo "       Verify network access and ROUTER_IMAGE value."
+    exit 1
+fi
+
+echo
+echo "==> Waiting for sandbox-router rollout (up to 3 minutes)..."
+if ! kubectl -n "${NAMESPACE}" rollout status deployment/sandbox-router-deployment --timeout=180s; then
+    echo "ERROR: sandbox-router did not become ready within 3 minutes."
+    echo "       Inspect: kubectl -n ${NAMESPACE} get pods -l app=sandbox-router"
+    exit 1
+fi
+
+echo
 echo "==> Applying 'python' SandboxTemplate to namespace '${NAMESPACE}'..."
 # Make sure the namespace exists; default 'default' always does, but a
 # user-supplied namespace might not.
@@ -138,6 +167,8 @@ echo "==> Verifying installation..."
 kubectl -n agent-sandbox-system get pods
 echo
 kubectl get sandboxtemplate -n "${NAMESPACE}"
+echo
+kubectl -n "${NAMESPACE}" get svc sandbox-router-svc
 
 echo
 echo "Agent-sandbox is installed and ready."
@@ -156,5 +187,6 @@ echo "         --use-k8s"
 echo
 echo "To uninstall later:"
 echo "  kubectl delete -n ${NAMESPACE} -f scripts/python-sandbox-template.yaml"
+echo "  kubectl delete -n ${NAMESPACE} deployment/sandbox-router-deployment service/sandbox-router-svc"
 echo "  kubectl delete -f ${EXTENSIONS_MANIFEST_URL}"
 echo "  kubectl delete -f ${CONTROLLER_MANIFEST_URL}"
