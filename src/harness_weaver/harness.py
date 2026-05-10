@@ -52,12 +52,22 @@ class Harness:
         """Execute one (task, configuration) pair end-to-end."""
         registry = self._build_registry(configuration)
         prompt = self._compose_prompt(task)
-        return self._runner.run(
+        trajectory = self._runner.run(
             prompt=prompt,
             configuration=configuration,
             registry=registry,
             task_id=task.task_id,
         )
+        # If the execution backend has sandbox telemetry to share (only
+        # AgentSandboxBackend does, and only when at least one
+        # run_python call provisioned the pod), stamp it on the
+        # trajectory. Trajectory is frozen, so we model_copy.
+        telemetry_fn = getattr(self._execution_backend, "telemetry", None)
+        if callable(telemetry_fn):
+            telemetry = telemetry_fn()
+            if telemetry is not None:
+                trajectory = trajectory.model_copy(update={"sandbox_telemetry": telemetry})
+        return trajectory
 
     def _build_registry(self, configuration: Configuration) -> ToolRegistry:
         """Construct a ToolRegistry containing every tool any agent in the

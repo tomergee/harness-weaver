@@ -1,0 +1,10 @@
+{
+  "task_id": "analytical-runtime-percentile",
+  "user_prompt": "Find every Sci-Fi title with rating >= 8.0 whose runtime falls between the catalog-wide median and the 90th percentile of runtime (computed across all genres, not just Sci-Fi). Sort the matches by year ascending and list every one — title, year, runtime, rating.",
+  "expected_outcome": "Computes the catalog-wide runtime median and 90th percentile, then filters Sci-Fi titles with rating >= 8.0 and runtime in [median, p90], sorted by year. Two derived statistics across the whole catalog plus a multi-condition filter — without run_python the agent has to eyeball percentiles, which is unreliable.",
+  "success_criteria": {
+    "min_rating": 8.0,
+    "must_include_genre": "Sci-Fi"
+  },
+  "tags": ["analytical", "percentile", "needs-run-python"]
+}

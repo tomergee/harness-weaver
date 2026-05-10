@@ -650,6 +650,105 @@ def test_form_renders_config_summaries_for_sidebar(client: TestClient) -> None:
     assert "multi-agent-discovery-explainer" in response.text
 
 
+def test_trajectory_view_shows_sandbox_panel_when_telemetry_present(
+    client: TestClient, tmp_runs_dir: Path
+) -> None:
+    """Trajectory view renders the K8s sandbox panel only when
+    ``sandbox_telemetry`` is populated. Confirms the panel exposes
+    pod / namespace / template / call-count fields."""
+    payload = {
+        "task_id": "demo",
+        "configuration_name": "single-agent-with-sandbox",
+        "started_at": "2026-05-09T00:00:00+00:00",
+        "completed_at": "2026-05-09T00:00:01+00:00",
+        "events": [],
+        "final_answer": "ok",
+        "total_cost_usd": None,
+        "num_turns": None,
+        "sandbox_telemetry": {
+            "pod_name": "sb-demo-7",
+            "namespace": "harness",
+            "template": "python",
+            "started_at": "2026-05-09T00:00:00+00:00",
+            "call_count": 3,
+            "total_call_seconds": 0.42,
+        },
+    }
+    (tmp_runs_dir / "demo.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    response = client.get("/trajectories/demo.json")
+    assert response.status_code == 200
+    text = response.text
+    assert "K8s sandbox" in text
+    assert "sb-demo-7" in text
+    assert "harness" in text
+    assert "python" in text
+    assert "<dt><code>run_python</code> calls</dt>" in text
+    assert "<dd>3</dd>" in text
+
+
+def test_trajectory_view_no_panel_without_telemetry(client: TestClient, tmp_runs_dir: Path) -> None:
+    payload = {
+        "task_id": "demo",
+        "configuration_name": "single-agent-basic",
+        "started_at": "2026-05-09T00:00:00+00:00",
+        "completed_at": "2026-05-09T00:00:01+00:00",
+        "events": [],
+        "final_answer": "ok",
+        "total_cost_usd": None,
+        "num_turns": None,
+        "sandbox_telemetry": None,
+    }
+    (tmp_runs_dir / "demo2.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    response = client.get("/trajectories/demo2.json")
+    assert response.status_code == 200
+    assert "K8s sandbox" not in response.text
+
+
+def test_jobs_sdk_call_detail_includes_sandbox_telemetry() -> None:
+    """The sdk-call done detail string on the live job page surfaces
+    sandbox telemetry when present."""
+    from datetime import UTC, datetime
+    from unittest.mock import MagicMock
+
+    from harness_weaver.trajectory import SandboxTelemetry
+    from harness_weaver.web.jobs import _sdk_call_detail
+
+    tel = SandboxTelemetry(
+        pod_name="sb-x",
+        namespace="default",
+        template="python",
+        started_at=datetime.now(UTC),
+        call_count=2,
+        total_call_seconds=0.5,
+    )
+    traj = MagicMock(events=[1, 2, 3], total_cost_usd=None, num_turns=None, sandbox_telemetry=tel)
+    detail = _sdk_call_detail(traj)
+    assert "recorded 3 event(s)" in detail
+    assert "sandbox: 2 run_python" in detail
+    assert "0.50s" in detail
+
+
+def test_analytical_pack_loads() -> None:
+    """The new analytical pack ships in examples/packs/ and validates
+    as a TaskPack with five tasks."""
+    from harness_weaver.task import TaskPack
+
+    pack_path = Path(__file__).resolve().parents[1] / "examples" / "packs" / "analytical.json"
+    pack = TaskPack.from_path(pack_path)
+    assert pack.name == "analytical"
+    assert len(pack.tasks) == 5
+    ids = {t.task_id for t in pack.tasks}
+    assert ids == {
+        "analytical-rating-per-runtime",
+        "analytical-decade-leaderboard",
+        "analytical-genre-quartile",
+        "analytical-runtime-percentile",
+        "analytical-genre-co-occurrence",
+    }
+
+
 # Keep the import quiet for ruff if unused.
 _ = SINGLE_AGENT_BASIC
 

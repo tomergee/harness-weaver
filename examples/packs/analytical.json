@@ -1,0 +1,57 @@
+{
+  "name": "analytical",
+  "description": "Five analytical recommendation tasks designed to need run_python: ranking by ratio, decade-level aggregation, within-genre quartile thresholds, percentile-bounded filters, and co-occurrence counts. Configurations without run_python should consistently underperform here; configurations with run_python (and therefore the K8s sandbox pod when --use-k8s is set) get to compute the answers exactly.",
+  "tasks": [
+    {
+      "task_id": "analytical-rating-per-runtime",
+      "user_prompt": "Among Thrillers in the catalog with runtime >= 90 minutes, which 3 titles have the highest rating-per-minute ratio? Show title, runtime, rating, and the ratio (rating divided by runtime, in 5-decimal precision) for each.",
+      "expected_outcome": "Lists exactly 3 thriller titles with runtime >= 90 min, sorted by rating/runtime descending, with the ratio computed precisely.",
+      "success_criteria": {
+        "min_results": 3,
+        "max_results": 3,
+        "min_runtime_minutes": 90,
+        "must_include_genre": "Thriller"
+      },
+      "tags": ["analytical", "ratio", "needs-run-python"]
+    },
+    {
+      "task_id": "analytical-decade-leaderboard",
+      "user_prompt": "Group every movie in the catalog by release decade (1970s, 1980s, 1990s, 2000s, 2010s, 2020s). For each decade, report the count of movies and the average rating, rounded to 2 decimal places. Then tell me which decade has the highest average and which has the lowest.",
+      "expected_outcome": "Returns one row per decade with count and average; clearly identifies the highest- and lowest-rated decades.",
+      "success_criteria": {
+        "min_results": 1
+      },
+      "tags": ["analytical", "aggregation", "needs-run-python"]
+    },
+    {
+      "task_id": "analytical-genre-quartile",
+      "user_prompt": "Look at user-001's watch history and figure out which single genre they've rated highest on average. Then, from the catalog as a whole, recommend a movie in that genre that lands in the top quartile (top 25%) by rating *within that genre* and is something user-001 has not already watched. Justify the pick with the catalog's facts.",
+      "user_id": "user-001",
+      "expected_outcome": "Identifies user-001's favorite genre by mean rating, computes the within-genre rating quartile threshold across the catalog, picks an unseen title above that threshold, and justifies with concrete facts.",
+      "success_criteria": {
+        "min_results": 1
+      },
+      "tags": ["analytical", "user-aware", "quartile", "needs-run-python"]
+    },
+    {
+      "task_id": "analytical-runtime-percentile",
+      "user_prompt": "Find every Sci-Fi title with rating >= 8.0 whose runtime falls between the catalog-wide median and the 90th percentile of runtime (computed across all genres, not just Sci-Fi). Sort the matches by year ascending and list every one — title, year, runtime, rating.",
+      "expected_outcome": "Computes the catalog-wide runtime median and 90th percentile, then filters Sci-Fi titles with rating >= 8.0 and runtime in [median, p90], sorted by year ascending.",
+      "success_criteria": {
+        "min_rating": 8.0,
+        "must_include_genre": "Sci-Fi"
+      },
+      "tags": ["analytical", "percentile", "needs-run-python"]
+    },
+    {
+      "task_id": "analytical-genre-co-occurrence",
+      "user_prompt": "Across user-001's watch history, find the most common pair of co-occurring genres (genres that appear together on the same title). Once you have the dominant pair, recommend one catalog title that matches that exact pair (both genres) which user-001 has not already seen.",
+      "user_id": "user-001",
+      "expected_outcome": "Counts every (genre, genre) pair across the user's watched titles, picks the top pair, finds an unseen title that has both genres, justifies with catalog facts.",
+      "success_criteria": {
+        "min_results": 1
+      },
+      "tags": ["analytical", "user-aware", "co-occurrence", "needs-run-python"]
+    }
+  ]
+}

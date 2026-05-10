@@ -340,3 +340,140 @@ class TestThreadingLockUsed:
         backend._lock = observed_lock  # type: ignore[assignment]
         backend.close()
         observed_lock.__enter__.assert_called()
+
+
+class TestTelemetry:
+    """Sandbox telemetry: ``call_count`` / ``total_call_seconds`` /
+    ``started_at`` get accumulated across run() calls and exposed via
+    ``telemetry()``. Lazy: ``telemetry()`` returns None when no pod
+    was ever provisioned (the chosen configuration didn't expose
+    run_python so the harness never reached the backend).
+    """
+
+    def test_telemetry_none_before_first_run(self) -> None:
+        client = _fake_client(_fake_sandbox())
+        backend = AgentSandboxBackend(client=client)
+        assert backend.telemetry() is None
+
+    def test_telemetry_records_call_after_run(self) -> None:
+        sandbox = _fake_sandbox()
+        sandbox.name = "sb-abc123"
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client, namespace="harness", template="python")
+        backend.run(ExecutionRequest(code="print(1)"))
+
+        tel = backend.telemetry()
+        assert tel is not None
+        assert tel.namespace == "harness"
+        assert tel.template == "python"
+        assert tel.pod_name == "sb-abc123"
+        assert tel.call_count == 1
+        assert tel.total_call_seconds >= 0.0
+        # started_at is timezone-aware; we don't pin the exact value.
+        assert tel.started_at.tzinfo is not None
+
+    def test_telemetry_accumulates_across_calls(self) -> None:
+        sandbox = _fake_sandbox()
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client)
+        backend.run(ExecutionRequest(code="print(1)"))
+        backend.run(ExecutionRequest(code="print(2)"))
+        backend.run(ExecutionRequest(code="print(3)"))
+        tel = backend.telemetry()
+        assert tel is not None
+        assert tel.call_count == 3
+
+    def test_telemetry_counts_failed_calls_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Even SandboxError-treated-as-timeout calls count toward
+        telemetry — the pod time was paid for either way."""
+        sandbox = _fake_sandbox(run_raises=SandboxError("kaboom"))
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client)
+        # Force the timeout-detection branch: pretend the call burned
+        # most of the budget.
+        import harness_weaver.execution.k8s as mod
+
+        clock = iter([0.0, 100.0])
+        monkeypatch.setattr(mod.time, "monotonic", lambda: next(clock))
+        result = backend.run(ExecutionRequest(code="print(1)", timeout_seconds=10.0))
+        assert result.timed_out
+        tel = backend.telemetry()
+        assert tel is not None
+        assert tel.call_count == 1
+        assert tel.total_call_seconds >= 90.0
+
+    def test_average_call_seconds_zero_when_no_calls(self) -> None:
+        """``average_call_seconds`` short-circuits the divide-by-zero
+        when call_count is 0 (e.g. the pod was provisioned but every
+        run() call raised before completing)."""
+        from datetime import UTC, datetime
+
+        from harness_weaver.trajectory import SandboxTelemetry
+
+        tel = SandboxTelemetry(
+            pod_name="sb-x",
+            namespace="default",
+            template="python",
+            started_at=datetime.now(UTC),
+            call_count=0,
+            total_call_seconds=0.0,
+        )
+        assert tel.average_call_seconds == 0.0
+
+    def test_telemetry_resets_counters_after_read(self) -> None:
+        """PR #20 review: counters reset on each telemetry() read.
+
+        In multi-task flows (``eval``, ``compare``) the Harness calls
+        telemetry() after every trajectory; without the reset, each
+        successive trajectory's telemetry would carry the previous
+        ones' activity and the CLI summary's aggregate-across-list
+        would double-count. ``started_at`` does *not* reset — the pod
+        is still the same pod.
+        """
+        sandbox = _fake_sandbox()
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client)
+        backend.run(ExecutionRequest(code="print(1)"))
+        backend.run(ExecutionRequest(code="print(2)"))
+
+        first = backend.telemetry()
+        assert first is not None
+        assert first.call_count == 2
+
+        # No further run() calls in between; second read should be
+        # zero counts but the same provisioning timestamp.
+        second = backend.telemetry()
+        assert second is not None
+        assert second.call_count == 0
+        assert second.total_call_seconds == 0.0
+        assert second.started_at == first.started_at
+
+    def test_telemetry_resets_when_fresh_pod_is_provisioned(self) -> None:
+        """PR #20 review: close() leaves the counters where they were,
+        but the next ``run()`` provisions a fresh pod via
+        ``_ensure_sandbox``, which must reset the counters so the new
+        pod's stats don't include the previous pod's activity.
+        ``started_at`` advances to the new pod's provisioning time.
+        """
+        sandbox_1 = _fake_sandbox()
+        sandbox_2 = _fake_sandbox()
+        client = MagicMock()
+        client.create_sandbox.side_effect = [sandbox_1, sandbox_2]
+        backend = AgentSandboxBackend(client=client)
+        backend.run(ExecutionRequest(code="print(1)"))
+        backend.run(ExecutionRequest(code="print(2)"))
+        first = backend.telemetry()
+        assert first is not None
+        assert first.call_count == 2
+        first_started_at = first.started_at
+
+        # Close terminates the pod; the next run gets a fresh one.
+        backend.close()
+        backend.run(ExecutionRequest(code="print(3)"))
+        second = backend.telemetry()
+        assert second is not None
+        # The new pod has *only* the one call we made under it,
+        # not 2 + 1.
+        assert second.call_count == 1
+        # started_at advanced to the new pod's provisioning time.
+        assert second.started_at >= first_started_at

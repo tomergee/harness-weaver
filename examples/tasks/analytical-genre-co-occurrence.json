@@ -1,0 +1,10 @@
+{
+  "task_id": "analytical-genre-co-occurrence",
+  "user_prompt": "Across user-001's watch history, find the most common pair of co-occurring genres (genres that appear together on the same title). Once you have the dominant pair, recommend one catalog title that matches that exact pair (both genres) which user-001 has not already seen.",
+  "user_id": "user-001",
+  "expected_outcome": "Counts every (genre, genre) pair across the user's watched titles, picks the top pair, finds an unseen title that has both genres, justifies with catalog facts. Pair counting across multi-label genre lists is awkward in prose; run_python makes it routine.",
+  "success_criteria": {
+    "min_results": 1
+  },
+  "tags": ["analytical", "user-aware", "co-occurrence", "needs-run-python"]
+}

@@ -1,0 +1,9 @@
+{
+  "task_id": "analytical-decade-leaderboard",
+  "user_prompt": "Group every movie in the catalog by release decade (1970s, 1980s, 1990s, 2000s, 2010s, 2020s). For each decade, report the count of movies and the average rating, rounded to 2 decimal places. Then tell me which decade has the highest average and which has the lowest.",
+  "expected_outcome": "Returns one row per decade with count and average; clearly identifies the highest- and lowest-rated decades. Computing averages across ~60 titles by hand is error-prone; agents with run_python should be both faster and more accurate here.",
+  "success_criteria": {
+    "min_results": 1
+  },
+  "tags": ["analytical", "aggregation", "needs-run-python"]
+}

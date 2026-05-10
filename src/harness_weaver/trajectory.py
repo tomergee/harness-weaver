@@ -75,6 +75,53 @@ TrajectoryEvent = Annotated[
 ]
 
 
+class SandboxTelemetry(BaseModel):
+    """K8s sandbox pod stats for one run.
+
+    Attached to :class:`Trajectory.sandbox_telemetry` when the run used
+    :class:`AgentSandboxBackend` AND an agent actually called
+    ``run_python`` at least once. Lets the trajectory view, the live
+    job page, and the CLI surface "the pod ran for N seconds across M
+    calls" without users having to dig into ``kubectl``.
+
+    None when the backend was the local subprocess one, or when the K8s
+    backend was wired in but no ``run_python`` call ever provisioned the
+    pod (the lazy no-op the K8s manual warns about).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    pod_name: str | None = Field(
+        default=None,
+        description=(
+            "Sandbox name as reported by the k8s-agent-sandbox client. None "
+            "when the SDK didn't surface a name (older clients) — the rest "
+            "of the fields are still meaningful in that case."
+        ),
+    )
+    namespace: str = Field(description="Kubernetes namespace the sandbox lived in.")
+    template: str = Field(description="SandboxTemplate name (e.g. 'python').")
+    started_at: datetime = Field(
+        description=(
+            "When ``AgentSandboxBackend`` first provisioned the pod. The pod "
+            "is created lazily on the first ``run_python`` call, not at "
+            "harness construction time."
+        )
+    )
+    call_count: int = Field(ge=0, description="Number of run_python invocations.")
+    total_call_seconds: float = Field(
+        ge=0.0,
+        description=(
+            "Wall-clock seconds spent inside ``sandbox.commands.run`` across "
+            "all calls. Excludes pod-provisioning time."
+        ),
+    )
+
+    @property
+    def average_call_seconds(self) -> float:
+        return self.total_call_seconds / self.call_count if self.call_count else 0.0
+
+
 class Trajectory(BaseModel):
     """Frozen record of one (task, configuration) run.
 
@@ -111,6 +158,15 @@ class Trajectory(BaseModel):
             "Number of model turns the SDK reported for this run. None when not available."
         ),
     )
+    sandbox_telemetry: SandboxTelemetry | None = Field(
+        default=None,
+        description=(
+            "K8s sandbox pod stats when the run used AgentSandboxBackend AND "
+            "an agent actually called run_python. None for local-subprocess "
+            "runs and for K8s runs where no agent reached the sandbox (the "
+            "backend is lazy — see docs/manual/k8s-sandbox.md)."
+        ),
+    )
 
     @property
     def tool_calls(self) -> list[ToolUse]:
@@ -145,6 +201,7 @@ class TrajectoryRecorder:
         self._final_answer: str | None = None
         self._total_cost_usd: float | None = None
         self._num_turns: int | None = None
+        self._sandbox_telemetry: SandboxTelemetry | None = None
 
     def record(self, event: TrajectoryEvent) -> None:
         self._events.append(event)
@@ -188,6 +245,15 @@ class TrajectoryRecorder:
     def final_answer(self, text: str, *, agent_id: str = "orchestrator") -> None:
         self.record(FinalAnswer(text=text, agent_id=agent_id))
 
+    def set_sandbox_telemetry(self, telemetry: SandboxTelemetry | None) -> None:
+        """Stamp K8s sandbox telemetry on the trajectory at finalize time.
+
+        Called by ``Harness.run`` after the runner returns; the harness
+        asks its execution backend whether it has anything to report
+        (only ``AgentSandboxBackend`` does). ``None`` is a no-op.
+        """
+        self._sandbox_telemetry = telemetry
+
     def set_cost(self, *, total_cost_usd: float | None, num_turns: int | None = None) -> None:
         """Attach provider-reported cost and turn count to the trajectory.
 
@@ -209,6 +275,7 @@ class TrajectoryRecorder:
             final_answer=self._final_answer,
             total_cost_usd=self._total_cost_usd,
             num_turns=self._num_turns,
+            sandbox_telemetry=self._sandbox_telemetry,
         )
 
 

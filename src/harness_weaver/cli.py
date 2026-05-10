@@ -158,6 +158,37 @@ def _write_trajectory(trajectory_json: str, path: Path) -> None:
     console.print(f"trajectory written to [bold]{path}[/bold]")
 
 
+def _print_sandbox_summary(trajectories: object) -> None:
+    """Print a one-line summary of K8s sandbox usage if any run hit it.
+
+    Iterates over ``trajectories`` (a single trajectory or an iterable),
+    collects ``sandbox_telemetry`` where present, and prints a short
+    line so the user can see *whether* the pod was actually exercised
+    and for how long. Silent when no telemetry was attached (local
+    backend, or K8s backend with a no-op configuration).
+    """
+    items: list[object] = (
+        list(trajectories) if isinstance(trajectories, list | tuple) else [trajectories]
+    )
+    total_calls = 0
+    total_seconds = 0.0
+    pods: set[str] = set()
+    for t in items:
+        tel = getattr(t, "sandbox_telemetry", None)
+        if tel is None:
+            continue
+        total_calls += tel.call_count
+        total_seconds += tel.total_call_seconds
+        if tel.pod_name:
+            pods.add(tel.pod_name)
+    if total_calls == 0:
+        return
+    pod_str = f" [dim]pods:[/dim] {', '.join(sorted(pods))}" if pods else ""
+    console.print(
+        f"[bold]sandbox:[/bold] {total_calls} run_python call(s) in {total_seconds:.2f}s{pod_str}"
+    )
+
+
 def _resolve_config(name: str, model_override: str | None) -> "Configuration":
     """Look up a built-in configuration and apply an optional model override.
 
@@ -242,6 +273,7 @@ def run(
         trajectory = harness.run(task_obj, cfg)
     out_path = output_dir / f"{trajectory.task_id}.{cfg.name}.json"
     _write_trajectory(trajectory.model_dump_json(indent=2), out_path)
+    _print_sandbox_summary(trajectory)
 
 
 @app.command()
@@ -300,6 +332,8 @@ def compare(
             out_path = output_dir / f"{trajectory.task_id}.{cfg.name}.json"
             _write_trajectory(trajectory.model_dump_json(indent=2), out_path)
             trajectories.append(trajectory)
+
+    _print_sandbox_summary(trajectories)
 
     # Structural report: always run, no API.
     report = StructuralReport.of(trajectories[0], trajectories[1], task=task_obj)
@@ -365,6 +399,8 @@ def eval_(
             out_path = output_dir / f"{trajectory.task_id}.{cfg.name}.json"
             _write_trajectory(trajectory.model_dump_json(indent=2), out_path)
             trajectories.append(trajectory)
+
+    _print_sandbox_summary(trajectories)
 
     summary = PackSummary.of(trajectories, pack=pack_obj, configuration_name=cfg.name)
     summary_path = output_dir / f"{pack_obj.name}.{cfg.name}.eval.md"

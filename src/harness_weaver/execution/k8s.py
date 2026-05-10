@@ -27,6 +27,7 @@ from __future__ import annotations
 import math
 import threading
 import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from k8s_agent_sandbox import SandboxClient, SandboxError
@@ -36,6 +37,7 @@ from harness_weaver.execution.base import (
     ExecutionRequest,
     ExecutionResult,
 )
+from harness_weaver.trajectory import SandboxTelemetry
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -101,6 +103,13 @@ class AgentSandboxBackend(ExecutionBackend):
         # call ``run()`` from multiple threads need the protection. See
         # PR #6 review.
         self._lock = threading.Lock()
+        # Telemetry. ``_pod_started_at`` doubles as the "did we ever
+        # provision a pod" sentinel; if it's None when the run finishes,
+        # the harness writes ``sandbox_telemetry=None`` on the
+        # Trajectory and the trajectory view skips the panel.
+        self._pod_started_at: datetime | None = None
+        self._call_count: int = 0
+        self._total_call_seconds: float = 0.0
 
     # --- ExecutionBackend protocol ------------------------------------
 
@@ -134,6 +143,10 @@ class AgentSandboxBackend(ExecutionBackend):
                 )
             except SandboxError as exc:
                 duration = time.monotonic() - start
+                # Even failed calls count toward telemetry — the user paid
+                # for the time spent in the pod regardless of exit code.
+                self._call_count += 1
+                self._total_call_seconds += duration
                 # Best-effort timeout detection: if we burned through the
                 # configured budget, treat as a timeout result rather than
                 # propagating the SDK exception. Otherwise the failure is
@@ -149,6 +162,8 @@ class AgentSandboxBackend(ExecutionBackend):
                     )
                 raise
             duration = time.monotonic() - start
+            self._call_count += 1
+            self._total_call_seconds += duration
             return ExecutionResult(
                 exit_code=sb_result.exit_code,
                 stdout=sb_result.stdout,
@@ -166,7 +181,56 @@ class AgentSandboxBackend(ExecutionBackend):
                 namespace=self._namespace,
                 sandbox_ready_timeout=self._ready_timeout,
             )
+            # Telemetry timestamp is set *after* create_sandbox returns
+            # so it reflects when the pod is actually usable, not when
+            # the request was made. Pod-provisioning time is therefore
+            # excluded from total_call_seconds.
+            self._pod_started_at = datetime.now(UTC)
+            # Fresh pod → reset the per-pod counters. Without this,
+            # close-then-run scenarios would attribute the old pod's
+            # activity to the new one (PR #20 review).
+            self._call_count = 0
+            self._total_call_seconds = 0.0
         return self._sandbox
+
+    def telemetry(self) -> SandboxTelemetry | None:
+        """Snapshot the pod's stats *since the last read*. ``None`` if no pod.
+
+        The Harness calls this after the runner returns and stamps the
+        result on the Trajectory. Counters reset on each read so that
+        in multi-task flows (``compare`` / ``eval``), each trajectory
+        captures only the pod activity that happened during *its* run
+        — the CLI summary can then aggregate across trajectories
+        without double-counting (PR #20 review).
+
+        ``started_at`` does *not* reset on read; it stays pinned to
+        when the pod was provisioned and only changes when a fresh pod
+        is created (close → run).
+
+        Lazy-no-op runs (where the chosen configuration didn't expose
+        ``run_python`` to any agent) return None here, which the
+        trajectory view treats as "skip the sandbox panel".
+        """
+        with self._lock:
+            if self._pod_started_at is None:
+                return None
+            raw_name = getattr(self._sandbox, "name", None) if self._sandbox else None
+            # The SDK might not surface ``name`` (older versions); MagicMock
+            # in tests auto-creates attributes, so we narrow to actual
+            # strings only — anything else maps to None.
+            pod_name = raw_name if isinstance(raw_name, str) else None
+            telemetry = SandboxTelemetry(
+                pod_name=pod_name,
+                namespace=self._namespace,
+                template=self._template,
+                started_at=self._pod_started_at,
+                call_count=self._call_count,
+                total_call_seconds=self._total_call_seconds,
+            )
+            # Reset per-trajectory counters; pod_started_at stays.
+            self._call_count = 0
+            self._total_call_seconds = 0.0
+            return telemetry
 
     def close(self) -> None:
         """Close the sandbox connection and (optionally) terminate the pod.

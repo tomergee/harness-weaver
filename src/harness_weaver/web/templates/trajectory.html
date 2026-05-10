@@ -21,6 +21,27 @@
   {% endif %}
 </dl>
 
+{% if trajectory.sandbox_telemetry %}
+  <section class="sandbox-panel">
+    <h2>K8s sandbox</h2>
+    <p class="meta">
+      The agent reached <code>run_python</code>; here's what the sandbox pod did during this run.
+    </p>
+    <dl class="summary">
+      {% if trajectory.sandbox_telemetry.pod_name %}
+        <dt>Pod</dt><dd><code>{{ trajectory.sandbox_telemetry.pod_name }}</code></dd>
+      {% endif %}
+      <dt>Namespace</dt><dd><code>{{ trajectory.sandbox_telemetry.namespace }}</code></dd>
+      <dt>Template</dt><dd><code>{{ trajectory.sandbox_telemetry.template }}</code></dd>
+      <dt>Provisioned at</dt><dd>{{ trajectory.sandbox_telemetry.started_at }}</dd>
+      <dt><code>run_python</code> calls</dt>
+      <dd>{{ trajectory.sandbox_telemetry.call_count }}</dd>
+      <dt>Total in-pod time</dt>
+      <dd>{{ "%.3f"|format(trajectory.sandbox_telemetry.total_call_seconds) }} s</dd>
+    </dl>
+  </section>
+{% endif %}
+
 <h2>Final answer</h2>
 {% if trajectory.final_answer %}
   <pre class="final-answer">{{ trajectory.final_answer }}</pre>

@@ -1,0 +1,10 @@
+{
+  "task_id": "analytical-genre-quartile",
+  "user_prompt": "Look at user-001's watch history and figure out which single genre they've rated highest on average. Then, from the catalog as a whole, recommend a movie in that genre that lands in the top quartile (top 25%) by rating *within that genre* and is something user-001 has not already watched. Justify the pick with the catalog's facts.",
+  "user_id": "user-001",
+  "expected_outcome": "Identifies user-001's favorite genre by mean rating across their history, computes the within-genre rating quartile threshold across the catalog, picks an unseen title above that threshold, and justifies with concrete facts (year, runtime, rating). Multi-step aggregation that genuinely benefits from run_python.",
+  "success_criteria": {
+    "min_results": 1
+  },
+  "tags": ["analytical", "user-aware", "quartile", "needs-run-python"]
+}

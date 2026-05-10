@@ -225,5 +225,114 @@ class TestMultiAgentDiscoveryExplainer:
         assert "explainer" in results[2].error
 
 
+# --- sandbox telemetry threading ----------------------------------------
+
+
+class TestSandboxTelemetryWiring:
+    """The Harness asks the execution backend whether it has telemetry
+    after the runner finishes, and stamps it on the Trajectory if so.
+    No new fields when the backend is the default (LocalSubprocess).
+    """
+
+    def test_default_backend_leaves_telemetry_none(
+        self, catalog: Catalog, discovery_task: Task
+    ) -> None:
+        runner = FakeAgentRunner(
+            [call("user_history", {"user_id": "user-001", "limit": 5}), answer("ok")]
+        )
+        trajectory = Harness(catalog=catalog, runner=runner).run(
+            discovery_task, SINGLE_AGENT_WITH_SANDBOX
+        )
+        # LocalSubprocessBackend has no `telemetry()` method, so the
+        # harness leaves the field as None.
+        assert trajectory.sandbox_telemetry is None
+
+    def test_backend_telemetry_is_attached_to_trajectory(
+        self, catalog: Catalog, discovery_task: Task
+    ) -> None:
+        """When the execution backend exposes a telemetry() method that
+        returns a SandboxTelemetry, the harness stamps it on the
+        finalized trajectory via model_copy."""
+        from datetime import UTC, datetime
+
+        from harness_weaver.execution.base import (
+            ExecutionBackend,
+            ExecutionRequest,
+            ExecutionResult,
+        )
+        from harness_weaver.trajectory import SandboxTelemetry
+
+        fake_telemetry = SandboxTelemetry(
+            pod_name="sb-pod-test",
+            namespace="default",
+            template="python",
+            started_at=datetime.now(UTC),
+            call_count=2,
+            total_call_seconds=1.25,
+        )
+
+        class _FakeBackend(ExecutionBackend):
+            def run(self, request: ExecutionRequest) -> ExecutionResult:
+                return ExecutionResult(
+                    exit_code=0,
+                    stdout="ok",
+                    stderr="",
+                    timed_out=False,
+                    duration_seconds=0.0,
+                )
+
+            def telemetry(self) -> SandboxTelemetry:
+                return fake_telemetry
+
+        runner = FakeAgentRunner(
+            [
+                call("run_python", {"code": "print(1)"}),
+                answer("ok"),
+            ]
+        )
+        trajectory = Harness(
+            catalog=catalog,
+            runner=runner,
+            execution_backend=_FakeBackend(),
+        ).run(discovery_task, SINGLE_AGENT_WITH_SANDBOX)
+
+        assert trajectory.sandbox_telemetry is not None
+        assert trajectory.sandbox_telemetry.pod_name == "sb-pod-test"
+        assert trajectory.sandbox_telemetry.call_count == 2
+
+    def test_backend_telemetry_none_does_not_overwrite(
+        self, catalog: Catalog, discovery_task: Task
+    ) -> None:
+        """A backend whose telemetry() returns None (e.g. K8s backend
+        on a no-op configuration that never reached run_python) leaves
+        the trajectory's field at its default of None."""
+        from harness_weaver.execution.base import (
+            ExecutionBackend,
+            ExecutionRequest,
+            ExecutionResult,
+        )
+
+        class _FakeBackend(ExecutionBackend):
+            def run(self, request: ExecutionRequest) -> ExecutionResult:
+                return ExecutionResult(
+                    exit_code=0,
+                    stdout="",
+                    stderr="",
+                    timed_out=False,
+                    duration_seconds=0.0,
+                )
+
+            def telemetry(self) -> None:
+                return None
+
+        runner = FakeAgentRunner(
+            [call("user_history", {"user_id": "user-001", "limit": 5}), answer("ok")]
+        )
+        trajectory = Harness(catalog=catalog, runner=runner, execution_backend=_FakeBackend()).run(
+            discovery_task, SINGLE_AGENT_WITH_SANDBOX
+        )
+        assert trajectory.sandbox_telemetry is None
+
+
 # RealAgentRunner has its own dedicated tests in test_real_agent_runner.py
 # that drive it through an injected fake query_fn — no live SDK needed.
