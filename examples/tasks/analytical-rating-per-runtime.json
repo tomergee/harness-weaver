@@ -1,0 +1,12 @@
+{
+  "task_id": "analytical-rating-per-runtime",
+  "user_prompt": "Among Thrillers in the catalog with runtime >= 90 minutes, which 3 titles have the highest rating-per-minute ratio? Show title, runtime, rating, and the ratio (rating divided by runtime, in 5-decimal precision) for each.",
+  "expected_outcome": "Lists exactly 3 thriller titles with runtime >= 90 min, sorted by rating/runtime descending, with the ratio computed precisely. Reasoning textually about ratios across many candidates is unreliable; agents with run_python should win this consistently.",
+  "success_criteria": {
+    "min_results": 3,
+    "max_results": 3,
+    "min_runtime_minutes": 90,
+    "must_include_genre": "Thriller"
+  },
+  "tags": ["analytical", "ratio", "needs-run-python"]
+}

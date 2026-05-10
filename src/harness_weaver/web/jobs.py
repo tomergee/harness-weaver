@@ -306,6 +306,28 @@ def _resolve_config(name: str, model_override: str) -> Configuration:
     return cfg.model_copy(update={"model": model_override})
 
 
+def _sdk_call_detail(trajectory: object) -> str:
+    """Detail string for the ``sdk-call*`` step's done event.
+
+    Includes event count, optional cost / turn count from the SDK, and
+    — when present — sandbox-pod telemetry so the live page makes it
+    obvious *which* SDK calls actually hit the K8s pod.
+    """
+    parts = [f"recorded {len(trajectory.events)} event(s)"]  # type: ignore[attr-defined]
+    cost = getattr(trajectory, "total_cost_usd", None)
+    if cost:
+        parts.append(f"cost ${cost:.6f}")
+    turns = getattr(trajectory, "num_turns", None)
+    if turns:
+        parts.append(f"{turns} turn(s)")
+    tel = getattr(trajectory, "sandbox_telemetry", None)
+    if tel is not None:
+        parts.append(
+            f"sandbox: {tel.call_count} run_python call(s) in {tel.total_call_seconds:.2f}s"
+        )
+    return " • ".join(parts)
+
+
 def _config_detail(cfg: Configuration) -> str:
     """One-line summary for the resolve step's detail field."""
     tool_summary = ", ".join(cfg.allowed_tools) if cfg.allowed_tools else "(none — orchestrator)"
@@ -376,15 +398,7 @@ def _do_run(
     ) as harness:
         job.emit("sdk-call", "running", "calling claude_agent_sdk.query() — this is the slow phase")
         trajectory = harness.run(task, cfg)
-        job.emit(
-            "sdk-call",
-            "done",
-            (
-                f"recorded {len(trajectory.events)} event(s)"
-                + (f" • cost ${trajectory.total_cost_usd:.6f}" if trajectory.total_cost_usd else "")
-                + (f" • {trajectory.num_turns} turn(s)" if trajectory.num_turns else "")
-            ),
-        )
+        job.emit("sdk-call", "done", _sdk_call_detail(trajectory))
 
     job.emit("write-output", "running")
     with _runs_output(runs_dir) as out:
@@ -431,7 +445,7 @@ def _do_compare(
                     trajectory.model_dump_json(indent=2), encoding="utf-8"
                 )
             trajs.append(trajectory)
-            job.emit(step_id, "done", f"recorded {len(trajectory.events)} event(s)")
+            job.emit(step_id, "done", _sdk_call_detail(trajectory))
 
     job.emit("structural-report", "running")
     report = StructuralReport.of(trajs[0], trajs[1], task=task)
@@ -506,7 +520,7 @@ def _do_eval(
                     trajectory.model_dump_json(indent=2), encoding="utf-8"
                 )
             trajs.append(trajectory)
-            job.emit(step_id, "done", f"recorded {len(trajectory.events)} event(s)")
+            job.emit(step_id, "done", _sdk_call_detail(trajectory))
 
     job.emit("aggregate", "running")
     summary = PackSummary.of(trajs, pack=pack, configuration_name=cfg.name)

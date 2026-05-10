@@ -340,3 +340,82 @@ class TestThreadingLockUsed:
         backend._lock = observed_lock  # type: ignore[assignment]
         backend.close()
         observed_lock.__enter__.assert_called()
+
+
+class TestTelemetry:
+    """Sandbox telemetry: ``call_count`` / ``total_call_seconds`` /
+    ``started_at`` get accumulated across run() calls and exposed via
+    ``telemetry()``. Lazy: ``telemetry()`` returns None when no pod
+    was ever provisioned (the chosen configuration didn't expose
+    run_python so the harness never reached the backend).
+    """
+
+    def test_telemetry_none_before_first_run(self) -> None:
+        client = _fake_client(_fake_sandbox())
+        backend = AgentSandboxBackend(client=client)
+        assert backend.telemetry() is None
+
+    def test_telemetry_records_call_after_run(self) -> None:
+        sandbox = _fake_sandbox()
+        sandbox.name = "sb-abc123"
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client, namespace="harness", template="python")
+        backend.run(ExecutionRequest(code="print(1)"))
+
+        tel = backend.telemetry()
+        assert tel is not None
+        assert tel.namespace == "harness"
+        assert tel.template == "python"
+        assert tel.pod_name == "sb-abc123"
+        assert tel.call_count == 1
+        assert tel.total_call_seconds >= 0.0
+        # started_at is timezone-aware; we don't pin the exact value.
+        assert tel.started_at.tzinfo is not None
+
+    def test_telemetry_accumulates_across_calls(self) -> None:
+        sandbox = _fake_sandbox()
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client)
+        backend.run(ExecutionRequest(code="print(1)"))
+        backend.run(ExecutionRequest(code="print(2)"))
+        backend.run(ExecutionRequest(code="print(3)"))
+        tel = backend.telemetry()
+        assert tel is not None
+        assert tel.call_count == 3
+
+    def test_telemetry_counts_failed_calls_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Even SandboxError-treated-as-timeout calls count toward
+        telemetry — the pod time was paid for either way."""
+        sandbox = _fake_sandbox(run_raises=SandboxError("kaboom"))
+        client = _fake_client(sandbox)
+        backend = AgentSandboxBackend(client=client)
+        # Force the timeout-detection branch: pretend the call burned
+        # most of the budget.
+        import harness_weaver.execution.k8s as mod
+
+        clock = iter([0.0, 100.0])
+        monkeypatch.setattr(mod.time, "monotonic", lambda: next(clock))
+        result = backend.run(ExecutionRequest(code="print(1)", timeout_seconds=10.0))
+        assert result.timed_out
+        tel = backend.telemetry()
+        assert tel is not None
+        assert tel.call_count == 1
+        assert tel.total_call_seconds >= 90.0
+
+    def test_average_call_seconds_zero_when_no_calls(self) -> None:
+        """``average_call_seconds`` short-circuits the divide-by-zero
+        when call_count is 0 (e.g. the pod was provisioned but every
+        run() call raised before completing)."""
+        from datetime import UTC, datetime
+
+        from harness_weaver.trajectory import SandboxTelemetry
+
+        tel = SandboxTelemetry(
+            pod_name="sb-x",
+            namespace="default",
+            template="python",
+            started_at=datetime.now(UTC),
+            call_count=0,
+            total_call_seconds=0.0,
+        )
+        assert tel.average_call_seconds == 0.0

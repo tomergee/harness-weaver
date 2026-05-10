@@ -181,6 +181,48 @@ Both the CLI and the web UI surface this:
 If you want the sandbox to actually run, pick `single-agent-with-sandbox`
 or define a custom configuration that allows `run_python`.
 
+### Sandbox telemetry on the trajectory
+
+When `AgentSandboxBackend` actually serves at least one `run_python`
+call, the harness stamps a `sandbox_telemetry` block on the resulting
+`Trajectory`:
+
+* `pod_name` — sandbox name (when the SDK surfaces it).
+* `namespace`, `template` — what the backend was configured with.
+* `started_at` — when the pod was first provisioned (timezone-aware).
+* `call_count` — number of `run_python` invocations.
+* `total_call_seconds` — wall-clock time spent inside `commands.run`
+  across every call. Pod-provisioning time is excluded.
+
+The CLI prints a one-line summary after `run` / `compare` / `eval`:
+
+```text
+sandbox: 4 run_python call(s) in 1.23s pods: sb-abc123
+```
+
+The web job page's *Run agent loop* step appends the same to its detail
+("`sandbox: N run_python call(s) in Xs`"), and the trajectory view
+renders a dedicated K8s sandbox panel above the final-answer block.
+Lazy no-op runs (no agent reached `run_python`) leave the field as
+`None` and skip the panel.
+
+### A pack designed to need the sandbox
+
+`examples/packs/analytical.json` is a 5-task pack that genuinely
+benefits from `run_python`: rating-per-runtime ranking, decade-level
+aggregation, within-genre quartile thresholds, percentile-bounded
+filters, and genre co-occurrence counting. Configurations without
+`run_python` should consistently underperform here. Try:
+
+```bash
+harness-weaver eval examples/packs/analytical.json \
+    --config single-agent-with-sandbox \
+    --use-k8s
+```
+
+— every task's *Run agent loop* step will (or should) hit the pod,
+and the CLI sandbox-summary line tallies what the pod actually did.
+
 ## Tear down
 
 ```bash

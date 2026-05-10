@@ -262,3 +262,90 @@ class TestK8sNoopWarning:
             cli_mod.console = original
 
         assert buf.getvalue() == ""
+
+
+# --- _print_sandbox_summary -----------------------------------------------
+
+
+class TestPrintSandboxSummary:
+    """The CLI prints a one-line ``sandbox: N call(s) in Xs`` summary
+    after a run when the trajectory has telemetry. Silent otherwise.
+    """
+
+    def _patched_console(self) -> tuple[object, object]:
+        from io import StringIO
+
+        from rich.console import Console as _Console
+
+        import harness_weaver.cli as cli_mod
+
+        buf = StringIO()
+        original = cli_mod.console
+        cli_mod.console = _Console(file=buf, force_terminal=False, width=120)
+        return buf, original
+
+    def _restore(self, original: object) -> None:
+        import harness_weaver.cli as cli_mod
+
+        cli_mod.console = original  # type: ignore[assignment]
+
+    def _make_telemetry(self, calls: int = 1, seconds: float = 0.5) -> object:
+        from datetime import UTC, datetime
+
+        from harness_weaver.trajectory import SandboxTelemetry
+
+        return SandboxTelemetry(
+            pod_name="sb-test",
+            namespace="default",
+            template="python",
+            started_at=datetime.now(UTC),
+            call_count=calls,
+            total_call_seconds=seconds,
+        )
+
+    def test_silent_when_no_telemetry(self) -> None:
+        from unittest.mock import MagicMock
+
+        from harness_weaver.cli import _print_sandbox_summary
+
+        traj = MagicMock(sandbox_telemetry=None)
+        buf, original = self._patched_console()
+        try:
+            _print_sandbox_summary(traj)
+        finally:
+            self._restore(original)
+        assert buf.getvalue() == ""
+
+    def test_prints_summary_for_single_trajectory(self) -> None:
+        from unittest.mock import MagicMock
+
+        from harness_weaver.cli import _print_sandbox_summary
+
+        traj = MagicMock(sandbox_telemetry=self._make_telemetry(calls=3, seconds=1.25))
+        buf, original = self._patched_console()
+        try:
+            _print_sandbox_summary(traj)
+        finally:
+            self._restore(original)
+        out = buf.getvalue()
+        assert "sandbox" in out
+        assert "3 run_python" in out
+        assert "1.25" in out
+        assert "sb-test" in out
+
+    def test_aggregates_across_list_of_trajectories(self) -> None:
+        """compare/eval pass a list; the summary aggregates counts and seconds."""
+        from unittest.mock import MagicMock
+
+        from harness_weaver.cli import _print_sandbox_summary
+
+        a = MagicMock(sandbox_telemetry=self._make_telemetry(calls=2, seconds=0.5))
+        b = MagicMock(sandbox_telemetry=self._make_telemetry(calls=4, seconds=1.0))
+        buf, original = self._patched_console()
+        try:
+            _print_sandbox_summary([a, b])
+        finally:
+            self._restore(original)
+        out = buf.getvalue()
+        assert "6 run_python" in out
+        assert "1.50" in out
