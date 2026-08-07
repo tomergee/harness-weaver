@@ -22,8 +22,8 @@ classifiers = [
 
 dependencies = [
     # Agent runtime. claude-agent-sdk is 0.x; cap to next minor.
-    "claude-agent-sdk>=0.1.70,<0.2",
-    "mcp>=1.20,<2",
+    "claude-agent-sdk>=0.1.70,<0.3",
+    "mcp>=1.20,<3",
     # Sandboxed execution. 0.x with active API churn; cap to next minor.
     "k8s-agent-sandbox>=0.4,<0.5",
     # Eval pipeline. 0.3.x is stable; bump floor to a recent patch.
