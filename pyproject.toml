@@ -25,7 +25,7 @@ dependencies = [
     "claude-agent-sdk>=0.1.70,<0.3",
     "mcp>=1.20,<3",
     # Sandboxed execution. 0.x with active API churn; cap to next minor.
-    "k8s-agent-sandbox>=0.4,<0.6",
+    "k8s-agent-sandbox>=0.4,<1.1",
     # Eval pipeline. 0.3.x is stable; bump floor to a recent patch.
     "inspect-ai>=0.3.200,<0.4",
     # inspect-ai's Anthropic provider needs the anthropic SDK at runtime;
